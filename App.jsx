@@ -381,7 +381,7 @@ function App() {
         <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "60px 24px", textAlign: "center" }}>
           <div style={S.badge}>AI-Powered Legal Engine</div>
           <h1 style={{ ...S.hero, fontSize: "clamp(52px, 10vw, 96px)", marginBottom: 20 }}>
-            They have lawyers.<br /><span style={{ color: "var(--red)" }}>Now you do too.</span>
+            They have lawyers.<br /><span style={{ color: "var(--primary)", textShadow: "0 0 30px rgba(139,92,246,0.6)" }}>Now you do too.</span>
           </h1>
           <p style={{ ...S.sub, maxWidth: 540, fontSize: 18, marginBottom: 48 }}>
             Paste your situation. Get a demand letter, regulatory complaint, email sequence, and legal strategy — in seconds. Free.
@@ -399,7 +399,7 @@ function App() {
           <div style={{ display: "flex", gap: 48, marginTop: 64, flexWrap: "wrap", justifyContent: "center" }}>
             {[["8", "Categories Covered"], ["5+", "Documents Generated"], ["50", "States Supported"], ["0", "Lawyers Needed"]].map(([n, l]) => (
               <div key={l} style={{ textAlign: "center" }}>
-                <div style={{ fontSize: 32, fontWeight: 900, color: "var(--red)", lineHeight: 1 }}>{n}</div>
+                <div style={{ fontSize: 32, fontWeight: 900, color: "var(--primary)", lineHeight: 1, textShadow: "0 0 20px rgba(139,92,246,0.5)" }}>{n}</div>
                 <div style={{ fontSize: 12, color: "var(--dim)", marginTop: 4, letterSpacing: "0.1em", textTransform: "uppercase" }}>{l}</div>
               </div>
             ))}
@@ -433,7 +433,7 @@ function App() {
           <button onClick={step === 1 ? resetToHome : () => setStep(s => s - 1)} style={S.backBtn}>← Back</button>
           <div style={{ display: "flex", gap: 6 }}>
             {[1, 2, 3, 4].map(i => (
-              <div key={i} style={{ width: 32, height: 4, borderRadius: 2, background: i <= step ? "var(--red)" : "var(--border)", transition: "background 0.3s" }} />
+              <div key={i} style={{ width: 32, height: 4, borderRadius: 2, background: i <= step ? "linear-gradient(90deg, var(--primary), var(--secondary))" : "var(--border)", transition: "all 0.3s" }} />
             ))}
           </div>
           <span style={{ fontSize: 12, color: "var(--dim)" }}>Step {step} of 4</span>
@@ -448,7 +448,7 @@ function App() {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 10, marginBottom: 32 }}>
               {CATEGORIES.map(c => (
                 <button key={c.id} onClick={() => setForm(f => ({ ...f, category: c.id }))}
-                  style={{ ...S.catCard, borderColor: form.category === c.id ? c.color : "var(--border)", background: form.category === c.id ? `${c.color}18` : "var(--card)", textAlign: "left", padding: 16 }}>
+                  style={{ ...S.catCard, borderColor: form.category === c.id ? c.color : "var(--border)", background: form.category === c.id ? `linear-gradient(135deg, ${c.color}30, ${c.color}15)` : "var(--card)", textAlign: "left", padding: 16, boxShadow: form.category === c.id ? `0 0 20px ${c.color}40` : "none" }}>
                   <span style={{ fontSize: 28 }}>{c.icon}</span>
                   <div style={{ fontWeight: 700, fontSize: 13, marginTop: 8 }}>{c.label}</div>
                   <div style={{ fontSize: 11, color: "var(--dim)", marginTop: 4, lineHeight: 1.4 }}>{c.desc}</div>
@@ -484,7 +484,7 @@ function App() {
               style={{ ...S.input, resize: "vertical", lineHeight: 1.7 }}
             />
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
-              <span style={{ fontSize: 12, color: form.situation.length < 100 ? "var(--red)" : "var(--dim)" }}>
+              <span style={{ fontSize: 12, color: form.situation.length < 100 ? "#fca5a5" : "var(--dim)" }}>
                 {form.situation.length < 100 ? `${100 - form.situation.length} more characters recommended` : "✓ Good detail"}
               </span>
               <span style={{ fontSize: 12, color: "var(--dim)" }}>{form.situation.length} chars</span>
@@ -524,7 +524,7 @@ function App() {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 20 }}>
               {["Full refund / payment", "Claim approved", "Repairs completed", "Reinstatement", "Written apology", "Policy change"].map(o => (
                 <button key={o} onClick={() => setForm(f => ({ ...f, outcome: o }))}
-                  style={{ ...S.optionBtn, borderColor: form.outcome === o ? "var(--red)" : "var(--border)", background: form.outcome === o ? "rgba(192,57,43,0.15)" : "var(--card)" }}>
+                  style={{ ...S.optionBtn, borderColor: form.outcome === o ? "var(--primary)" : "var(--border)", background: form.outcome === o ? "linear-gradient(135deg, rgba(139,92,246,0.3), rgba(59,130,246,0.2))" : "var(--card)", boxShadow: form.outcome === o ? "0 0 20px rgba(139,92,246,0.3)" : "none" }}>
                   {o}
                 </button>
               ))}
@@ -550,12 +550,12 @@ function App() {
       <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>
         <div style={{ textAlign: "center", animation: "fadeUp 0.3s ease" }}>
           <div style={S.spinner} />
-          <p style={{ fontSize: 22, color: "var(--red)", fontStyle: "italic", marginBottom: 8, marginTop: 32 }}>{loadingMsgs[loadingMsg]}</p>
+          <p style={{ fontSize: 22, color: "var(--primary)", fontStyle: "italic", marginBottom: 8, marginTop: 32, textShadow: "0 0 20px rgba(139,92,246,0.5)" }}>{loadingMsgs[loadingMsg]}</p>
           <p style={{ fontSize: 14, color: "var(--dim)" }}>Building your complete case file...</p>
           <div style={{ marginTop: 40, display: "flex", flexDirection: "column", gap: 8, maxWidth: 300 }}>
             {loadingMsgs.map((m, i) => (
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, opacity: i <= loadingMsg ? 1 : 0.2, transition: "opacity 0.3s" }}>
-                <div style={{ width: 8, height: 8, borderRadius: "50%", background: i < loadingMsg ? "var(--green)" : i === loadingMsg ? "var(--red)" : "var(--border)", transition: "background 0.3s" }} />
+                <div style={{ width: 8, height: 8, borderRadius: "50%", background: i < loadingMsg ? "var(--green)" : i === loadingMsg ? "var(--primary)" : "var(--border)", transition: "background 0.3s", boxShadow: i === loadingMsg ? "0 0 10px var(--primary)" : "none" }} />
                 <span style={{ fontSize: 13, color: i <= loadingMsg ? "var(--text)" : "var(--dim)" }}>{m}</span>
               </div>
             ))}
@@ -579,7 +579,7 @@ function App() {
       { id: "chat", label: "💬 Ask AI" },
     ];
 
-    const urgencyColor = { low: "var(--green)", medium: "#f39c12", high: "#e67e22", critical: "var(--red)" }[results.urgencyLevel] || "var(--dim)";
+    const urgencyColor = { low: "var(--green)", medium: "#fbbf24", high: "#fb923c", critical: "#ef4444" }[results.urgencyLevel] || "var(--dim)";
 
     return (
       <Shell>
@@ -614,11 +614,11 @@ function App() {
               <div style={{ textAlign: "center", minWidth: 100 }}>
                 <svg width="100" height="100" style={{ transform: "rotate(-90deg)" }}>
                   <circle cx="50" cy="50" r="40" fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="8" />
-                  <circle cx="50" cy="50" r="40" fill="none" stroke="var(--red)" strokeWidth="8"
+                  <circle cx="50" cy="50" r="40" fill="none" stroke="var(--primary)" strokeWidth="8"
                     strokeDasharray={`${2 * Math.PI * 40 * results.strengthScore / 100} ${2 * Math.PI * 40 * (1 - results.strengthScore / 100)}`}
-                    strokeLinecap="round" style={{ transition: "stroke-dasharray 1s ease" }} />
+                    strokeLinecap="round" style={{ transition: "stroke-dasharray 1s ease", filter: "drop-shadow(0 0 8px rgba(139,92,246,0.6))" }} />
                 </svg>
-                <div style={{ marginTop: -70, marginBottom: 24, fontSize: 22, fontWeight: 900, color: "var(--red)" }}>{results.strengthScore}%</div>
+                <div style={{ marginTop: -70, marginBottom: 24, fontSize: 22, fontWeight: 900, color: "var(--primary)", textShadow: "0 0 20px rgba(139,92,246,0.6)" }}>{results.strengthScore}%</div>
                 <div style={{ fontSize: 10, color: "var(--dim)", letterSpacing: "0.1em", textTransform: "uppercase" }}>Case Strength</div>
               </div>
             </div>
@@ -628,8 +628,8 @@ function App() {
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, marginBottom: 32 }}>
                 {[
                   { label: "Settlement likely", val: results.winProbability.settlement + "%", color: "var(--green)" },
-                  { label: "Full win possible", val: results.winProbability.fullWin + "%", color: "var(--red)" },
-                  { label: "Strength score", val: results.strengthScore + "%", color: "#f39c12" },
+                  { label: "Full win possible", val: results.winProbability.fullWin + "%", color: "var(--primary)" },
+                  { label: "Strength score", val: results.strengthScore + "%", color: "var(--accent)" },
                 ].map(s => (
                   <div key={s.label} style={{ ...S.card, textAlign: "center", padding: "16px 12px" }}>
                     <div style={{ fontSize: 24, fontWeight: 900, color: s.color }}>{s.val}</div>
@@ -643,7 +643,7 @@ function App() {
             <div style={{ display: "flex", gap: 2, borderBottom: "1px solid var(--border)", marginBottom: 24, overflowX: "auto", paddingBottom: 1 }}>
               {tabs.map(t => (
                 <button key={t.id} onClick={() => setActiveTab(t.id)}
-                  style={{ background: "none", border: "none", borderBottom: activeTab === t.id ? "2px solid var(--red)" : "2px solid transparent", color: activeTab === t.id ? "var(--text)" : "var(--dim)", padding: "10px 14px", cursor: "pointer", fontSize: 13, fontFamily: "var(--font)", whiteSpace: "nowrap", transition: "all 0.2s" }}>
+                  style={{ background: "none", border: "none", borderBottom: activeTab === t.id ? "2px solid var(--primary)" : "2px solid transparent", color: activeTab === t.id ? "var(--text)" : "var(--dim)", padding: "10px 14px", cursor: "pointer", fontSize: 13, fontFamily: "var(--font)", whiteSpace: "nowrap", transition: "all 0.2s" }}>
                   {t.label}
                 </button>
               ))}
@@ -655,12 +655,12 @@ function App() {
                 <h3 style={S.sectionTitle}>Next Steps</h3>
                 {results.nextSteps?.map((s, i) => (
                   <div key={i} style={{ ...S.card, display: "flex", gap: 16, alignItems: "flex-start" }}>
-                    <div style={{ width: 28, height: 28, borderRadius: "50%", background: s.importance === "critical" ? "var(--red)" : s.importance === "important" ? "#f39c12" : "var(--border)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, flexShrink: 0, color: s.importance === "optional" ? "var(--dim)" : "white" }}>{i + 1}</div>
+                    <div style={{ width: 28, height: 28, borderRadius: "50%", background: s.importance === "critical" ? "#ef4444" : s.importance === "important" ? "#fbbf24" : "var(--border)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, flexShrink: 0, color: s.importance === "optional" ? "var(--dim)" : "white", boxShadow: s.importance === "critical" ? "0 0 15px rgba(239,68,68,0.5)" : "none" }}>{i + 1}</div>
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>{s.step}</div>
                       <div style={{ fontSize: 12, color: "var(--dim)" }}>{s.timeline}</div>
                     </div>
-                    <div style={{ fontSize: 11, padding: "3px 8px", borderRadius: 3, background: s.importance === "critical" ? "rgba(192,57,43,0.2)" : "var(--card)", color: s.importance === "critical" ? "var(--red)" : "var(--dim)", border: "1px solid var(--border)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{s.importance}</div>
+                    <div style={{ fontSize: 11, padding: "3px 8px", borderRadius: 3, background: s.importance === "critical" ? "rgba(239,68,68,0.2)" : "var(--card)", color: s.importance === "critical" ? "#fca5a5" : "var(--dim)", border: "1px solid var(--border)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{s.importance}</div>
                   </div>
                 ))}
                 <div style={{ display: "flex", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
@@ -678,11 +678,11 @@ function App() {
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                 <h3 style={S.sectionTitle}>Your Rights Being Violated</h3>
                 {results.rights?.map((r, i) => (
-                  <div key={i} style={{ ...S.card, borderLeft: `3px solid ${r.strength === "strong" ? "var(--red)" : r.strength === "moderate" ? "#f39c12" : "var(--dim)"}` }}>
+                  <div key={i} style={{ ...S.card, borderLeft: `3px solid ${r.strength === "strong" ? "var(--primary)" : r.strength === "moderate" ? "#fbbf24" : "var(--dim)"}`, animation: "slideIn 0.3s ease" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 6 }}>
                       <div style={{ fontWeight: 700, fontSize: 15 }}>{r.title}</div>
                       <div style={{ display: "flex", gap: 8 }}>
-                        <span style={{ fontSize: 11, color: "var(--red)", background: "rgba(192,57,43,0.1)", padding: "3px 8px", borderRadius: 3, border: "1px solid rgba(192,57,43,0.2)" }}>{r.law}</span>
+                        <span style={{ fontSize: 11, color: "var(--primary)", background: "rgba(139,92,246,0.15)", padding: "3px 8px", borderRadius: 3, border: "1px solid rgba(139,92,246,0.3)" }}>{r.law}</span>
                         <span style={{ fontSize: 11, padding: "3px 8px", borderRadius: 3, background: "var(--card)", border: "1px solid var(--border)", color: "var(--dim)", textTransform: "capitalize" }}>{r.strength}</span>
                       </div>
                     </div>
@@ -727,7 +727,7 @@ function App() {
                   <div key={i} style={S.card}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
                       <div>
-                        <span style={{ fontSize: 11, color: "var(--red)", textTransform: "uppercase", letterSpacing: "0.1em" }}>{e.timing} · {e.tone}</span>
+                        <span style={{ fontSize: 11, color: "var(--primary)", textTransform: "uppercase", letterSpacing: "0.1em" }}>{e.timing} · {e.tone}</span>
                         <div style={{ fontWeight: 700, fontSize: 15, marginTop: 4 }}>Subject: {e.subject}</div>
                         <div style={{ fontSize: 12, color: "var(--dim)", marginTop: 2 }}>Goal: {e.purpose}</div>
                       </div>
@@ -745,15 +745,15 @@ function App() {
                 {results.predictedResponses?.map((r, i) => (
                   <div key={i} style={S.card}>
                     <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-                      <span style={{ fontSize: 11, padding: "3px 10px", borderRadius: 20, background: r.probability === "likely" ? "rgba(192,57,43,0.2)" : "var(--card)", border: "1px solid var(--border)", color: r.probability === "likely" ? "var(--red)" : "var(--dim)", textTransform: "capitalize" }}>{r.probability}</span>
+                      <span style={{ fontSize: 11, padding: "3px 10px", borderRadius: 20, background: r.probability === "likely" ? "rgba(139,92,246,0.2)" : "var(--card)", border: "1px solid var(--border)", color: r.probability === "likely" ? "var(--primary)" : "var(--dim)", textTransform: "capitalize" }}>{r.probability}</span>
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
                       <div>
                         <div style={{ fontSize: 11, color: "var(--dim)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>They'll say</div>
                         <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: "#aaa", fontStyle: "italic" }}>"{r.response}"</p>
                       </div>
-                      <div style={{ borderLeft: "2px solid var(--red)", paddingLeft: 16 }}>
-                        <div style={{ fontSize: 11, color: "var(--red)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>You respond</div>
+                      <div style={{ borderLeft: "2px solid var(--primary)", paddingLeft: 16 }}>
+                        <div style={{ fontSize: 11, color: "var(--primary)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>You respond</div>
                         <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6 }}>{r.counter}</p>
                       </div>
                     </div>
@@ -910,28 +910,35 @@ function Shell({ children }) {
     <div style={{
       minHeight: "100vh", background: "var(--bg)", color: "var(--text)",
       fontFamily: "var(--font)",
-      "--bg": "#080808",
-      "--card": "rgba(255,255,255,0.04)",
-      "--border": "rgba(255,255,255,0.08)",
-      "--text": "#e8e0d0",
-      "--dim": "#666",
-      "--red": "#c0392b",
-      "--green": "#27ae60",
-      "--font": "'Georgia', 'Times New Roman', serif",
+      "--bg": "linear-gradient(135deg, #0f0c29 0%, #302b63 50%, #24243e 100%)",
+      "--card": "rgba(255,255,255,0.08)",
+      "--border": "rgba(139,92,246,0.3)",
+      "--text": "#f0f0f0",
+      "--dim": "#a0a0b0",
+      "--primary": "#8b5cf6",
+      "--secondary": "#3b82f6",
+      "--accent": "#06b6d4",
+      "--green": "#10b981",
+      "--font": "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
     }}>
-      <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 0, background: "radial-gradient(ellipse at 15% 50%, rgba(192,57,43,0.06) 0%, transparent 55%), radial-gradient(ellipse at 85% 20%, rgba(192,57,43,0.04) 0%, transparent 50%)" }} />
+      <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 0, background: "radial-gradient(ellipse at 20% 30%, rgba(139,92,246,0.15) 0%, transparent 50%), radial-gradient(ellipse at 80% 70%, rgba(59,130,246,0.12) 0%, transparent 50%)", animation: "pulse 8s ease-in-out infinite" }} />
       <div style={{ position: "relative", zIndex: 1 }}>{children}</div>
       <style>{`
         * { box-sizing: border-box; }
-        @keyframes fadeUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes slideIn { from { opacity: 0; transform: translateX(-20px); } to { opacity: 1; transform: translateX(0); } }
         @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
-        input:focus, textarea:focus, select:focus { outline: none; border-color: rgba(192,57,43,0.6) !important; }
-        textarea::placeholder, input::placeholder { color: #333; }
-        ::-webkit-scrollbar { width: 5px; height: 5px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
-        button:hover { filter: brightness(1.1); }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.7} }
+        @keyframes glow { 0%,100%{box-shadow: 0 0 20px rgba(139,92,246,0.3)} 50%{box-shadow: 0 0 30px rgba(139,92,246,0.5)} }
+        input:focus, textarea:focus, select:focus { outline: none; border-color: var(--primary) !important; box-shadow: 0 0 0 3px rgba(139,92,246,0.2); }
+        textarea::placeholder, input::placeholder { color: #666; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: rgba(0,0,0,0.2); }
+        ::-webkit-scrollbar-thumb { background: rgba(139,92,246,0.5); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(139,92,246,0.7); }
+        button:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(139,92,246,0.3); }
+        button:active { transform: translateY(0); }
+        button { transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
         a:hover { text-decoration: underline; }
       `}</style>
     </div>
@@ -945,23 +952,23 @@ function Gavel({ size = 32 }) {
 // ─── STYLES ────────────────────────────────────────────────────────────────
 
 const S = {
-  hero: { fontSize: "clamp(40px, 8vw, 80px)", fontWeight: 900, margin: "0 0 16px", lineHeight: 0.95, letterSpacing: "-0.03em", color: "#f0e8d8" },
-  sub: { fontSize: 16, color: "#888", lineHeight: 1.7, margin: "0 auto" },
-  badge: { display: "inline-block", background: "rgba(192,57,43,0.15)", border: "1px solid rgba(192,57,43,0.4)", borderRadius: 2, padding: "4px 14px", fontSize: 11, letterSpacing: "0.2em", textTransform: "uppercase", color: "#c0392b", marginBottom: 20 },
-  nav: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 24px", borderBottom: "1px solid rgba(255,255,255,0.06)", background: "rgba(8,8,8,0.9)" },
-  navBtn: { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 4, padding: "7px 14px", color: "#888", fontSize: 12, cursor: "pointer", fontFamily: "Georgia, serif" },
-  backBtn: { background: "none", border: "none", color: "#666", fontSize: 13, cursor: "pointer", fontFamily: "Georgia, serif", padding: "4px 0" },
-  card: { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 6, padding: "20px" },
-  btn: { background: "#c0392b", border: "none", borderRadius: 4, color: "white", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "Georgia, serif", padding: "14px 24px", letterSpacing: "0.02em", transition: "all 0.2s" },
-  ghostBtn: { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 4, color: "#888", fontSize: 13, cursor: "pointer", fontFamily: "Georgia, serif", padding: "12px 20px" },
-  smallBtn: { background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 3, color: "#888", fontSize: 12, cursor: "pointer", fontFamily: "Georgia, serif", padding: "6px 12px" },
-  input: { width: "100%", background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 4, padding: "14px 16px", color: "#e8e0d0", fontSize: 14, fontFamily: "Georgia, serif", transition: "border-color 0.2s", display: "block" },
-  label: { display: "block", fontSize: 11, letterSpacing: "0.2em", textTransform: "uppercase", color: "#666", marginBottom: 10, marginTop: 20 },
-  catCard: { background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 6, padding: "14px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "flex-start", transition: "all 0.2s", color: "#e8e0d0", fontFamily: "Georgia, serif" },
-  optionBtn: { background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 4, padding: "12px", cursor: "pointer", color: "#e8e0d0", fontFamily: "Georgia, serif", fontSize: 13, transition: "all 0.2s", textAlign: "center" },
-  stepTitle: { fontSize: 28, fontWeight: 900, margin: "0 0 12px", letterSpacing: "-0.02em" },
-  sectionTitle: { fontSize: 18, fontWeight: 700, margin: "0 0 16px", letterSpacing: "-0.01em" },
-  errorBox: { background: "rgba(192,57,43,0.15)", border: "1px solid rgba(192,57,43,0.4)", borderRadius: 4, padding: "12px 16px", marginBottom: 20, fontSize: 14, color: "#e74c3c" },
-  urgentBox: { background: "rgba(243,156,18,0.1)", border: "1px solid rgba(243,156,18,0.3)", borderRadius: 4, padding: "12px 16px", fontSize: 13, color: "#f39c12", lineHeight: 1.5 },
-  spinner: { width: 48, height: 48, border: "2px solid rgba(192,57,43,0.2)", borderTop: "2px solid #c0392b", borderRadius: "50%", margin: "0 auto", animation: "spin 0.8s linear infinite" },
+  hero: { fontSize: "clamp(40px, 8vw, 80px)", fontWeight: 900, margin: "0 0 16px", lineHeight: 0.95, letterSpacing: "-0.03em", color: "#ffffff", textShadow: "0 0 40px rgba(139,92,246,0.5)" },
+  sub: { fontSize: 16, color: "var(--dim)", lineHeight: 1.7, margin: "0 auto" },
+  badge: { display: "inline-block", background: "linear-gradient(135deg, rgba(139,92,246,0.2), rgba(59,130,246,0.2))", border: "1px solid rgba(139,92,246,0.5)", borderRadius: 20, padding: "6px 16px", fontSize: 11, letterSpacing: "0.15em", textTransform: "uppercase", color: "#a78bfa", marginBottom: 20, animation: "glow 3s ease-in-out infinite" },
+  nav: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 24px", borderBottom: "1px solid rgba(139,92,246,0.2)", background: "rgba(15,12,41,0.8)", backdropFilter: "blur(10px)" },
+  navBtn: { background: "rgba(139,92,246,0.15)", border: "1px solid rgba(139,92,246,0.3)", borderRadius: 8, padding: "8px 16px", color: "#a78bfa", fontSize: 12, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 },
+  backBtn: { background: "none", border: "none", color: "var(--dim)", fontSize: 13, cursor: "pointer", fontFamily: "inherit", padding: "4px 0", fontWeight: 500 },
+  card: { background: "rgba(255,255,255,0.08)", border: "1px solid rgba(139,92,246,0.3)", borderRadius: 12, padding: "20px", backdropFilter: "blur(10px)", boxShadow: "0 4px 6px rgba(0,0,0,0.1)" },
+  btn: { background: "linear-gradient(135deg, #8b5cf6 0%, #3b82f6 100%)", border: "none", borderRadius: 8, color: "white", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", padding: "14px 24px", letterSpacing: "0.02em", boxShadow: "0 4px 12px rgba(139,92,246,0.4)" },
+  ghostBtn: { background: "rgba(139,92,246,0.1)", border: "1px solid rgba(139,92,246,0.3)", borderRadius: 8, color: "#a78bfa", fontSize: 13, cursor: "pointer", fontFamily: "inherit", padding: "12px 20px", fontWeight: 600 },
+  smallBtn: { background: "rgba(139,92,246,0.15)", border: "1px solid rgba(139,92,246,0.3)", borderRadius: 6, color: "#a78bfa", fontSize: 12, cursor: "pointer", fontFamily: "inherit", padding: "6px 12px", fontWeight: 600 },
+  input: { width: "100%", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(139,92,246,0.3)", borderRadius: 8, padding: "14px 16px", color: "var(--text)", fontSize: 14, fontFamily: "inherit", transition: "all 0.2s" },
+  label: { display: "block", fontSize: 11, letterSpacing: "0.15em", textTransform: "uppercase", color: "var(--dim)", marginBottom: 10, marginTop: 20, fontWeight: 600 },
+  catCard: { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(139,92,246,0.3)", borderRadius: 12, padding: "14px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "flex-start", transition: "all 0.3s", color: "var(--text)", fontFamily: "inherit" },
+  optionBtn: { background: "rgba(255,255,255,0.05)", border: "1px solid rgba(139,92,246,0.3)", borderRadius: 8, padding: "12px", cursor: "pointer", color: "var(--text)", fontFamily: "inherit", fontSize: 13, transition: "all 0.3s", textAlign: "center", fontWeight: 500 },
+  stepTitle: { fontSize: 28, fontWeight: 900, margin: "0 0 12px", letterSpacing: "-0.02em", color: "#ffffff" },
+  sectionTitle: { fontSize: 18, fontWeight: 700, margin: "0 0 16px", letterSpacing: "-0.01em", color: "#ffffff" },
+  errorBox: { background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.4)", borderRadius: 8, padding: "12px 16px", marginBottom: 20, fontSize: 14, color: "#fca5a5" },
+  urgentBox: { background: "rgba(251,191,36,0.15)", border: "1px solid rgba(251,191,36,0.4)", borderRadius: 8, padding: "12px 16px", fontSize: 13, color: "#fcd34d", lineHeight: 1.5 },
+  spinner: { width: 48, height: 48, border: "3px solid rgba(139,92,246,0.2)", borderTop: "3px solid #8b5cf6", borderRadius: "50%", margin: "0 auto", animation: "spin 0.8s linear infinite" },
 };

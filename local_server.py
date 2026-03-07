@@ -15,17 +15,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Use GPT-2 with smart prompt engineering to get better responses
+# Use better free models - Flan-T5-Large for better quality
 # chat generator (fallback)
-chat_generator = pipeline("text-generation", "gpt2")
-W
-# analyzer: instruction-tuned text2text model for structured outputs
 try:
-    analyzer = pipeline("text2text-generation", "google/flan-t5-base")
+    chat_generator = pipeline("text-generation", "gpt2")
 except Exception as e:
-    print(f"flan-t5 model failed to load: {e}")
-    print("Falling back to GPT-2 text-generation for analysis (lower quality)")
-    analyzer = None
+    print(f"GPT-2 failed to load: {e}")
+    chat_generator = None
+
+# analyzer: instruction-tuned text2text model for structured outputs
+# Using flan-t5-large instead of base for much better quality
+try:
+    print("Loading Flan-T5-Large model (this may take a minute first time)...")
+    analyzer = pipeline("text2text-generation", "google/flan-t5-large")
+    print("Model loaded successfully!")
+except Exception as e:
+    print(f"flan-t5-large model failed to load: {e}")
+    print("Falling back to flan-t5-base...")
+    try:
+        analyzer = pipeline("text2text-generation", "google/flan-t5-base")
+    except:
+        print("Falling back to GPT-2 text-generation for analysis (lower quality)")
+        analyzer = None
 
 class Message(BaseModel):
     role: str
@@ -107,7 +118,7 @@ Produce short, factual values. strengthScore must be an integer 0-100. demandLet
 
     # If instruction-tuned model available, use it
     if analyzer is not None:
-        out = analyzer(prompt, max_length=512)
+        out = analyzer(prompt, max_length=1024, do_sample=True, temperature=0.7)
         text = out[0]["generated_text"]
     else:
         # fallback: simple heuristic analyzer

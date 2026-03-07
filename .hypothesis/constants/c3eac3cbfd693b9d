@@ -1,0 +1,4 @@
+# file: C:\Users\llama\YOGESHISALLAH\ai_engine\config.py
+# hypothesis_version: 6.150.3
+
+['./models/model.gguf', '0.7', '4096', 'ANTHROPIC_API_KEY', 'CLAUDE_MODEL', 'LOCAL_MODEL_NAME', 'LOCAL_MODEL_PATH', 'MAX_TOKENS', 'TEMPERATURE', 'USE_LOCAL', 'false', 'llama-3-70b', 'true']
