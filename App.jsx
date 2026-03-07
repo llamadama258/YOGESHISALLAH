@@ -1,9 +1,28 @@
-import { useState, useEffect, useRef } from "react";
+// use React globals instead of ES imports
+const { useState, useEffect, useRef } = React;
 
 // When running inside claude.ai artifacts, no API key is needed —
 // requests go through the built-in proxy automatically.
 
-const API_URL = "https://api.anthropic.com/v1/messages";
+// configuration: use local inference instead of Claude
+const USE_LOCAL = true; // set false to use Anthropic
+const LOCAL_URL = "http://127.0.0.1:5001/generate";
+const LOCAL_ANALYZE = "http://127.0.0.1:5001/analyze";
+const LOCAL_LETTER = "http://127.0.0.1:5001/generate-letter";
+const LOCAL_EMAILS = "http://127.0.0.1:5001/generate-emails";
+const API_URL = USE_LOCAL ? LOCAL_URL : "https://api.anthropic.com/v1/messages";
+// store the API key in localStorage so user isn't prompted every time
+let API_KEY = localStorage.getItem("sts_api_key") || "";
+
+function ensureApiKey() {
+  if (!API_KEY) {
+    const key = window.prompt("Enter your Anthropic API key:");
+    if (key && key.trim()) {
+      API_KEY = key.trim();
+      localStorage.setItem("sts_api_key", API_KEY);
+    }
+  }
+}
 
 const US_STATES = ["Alabama","Alaska","Arizona","Arkansas","California","Colorado","Connecticut","Delaware","Florida","Georgia","Hawaii","Idaho","Illinois","Indiana","Iowa","Kansas","Kentucky","Louisiana","Maine","Maryland","Massachusetts","Michigan","Minnesota","Mississippi","Missouri","Montana","Nebraska","Nevada","New Hampshire","New Jersey","New Mexico","New York","North Carolina","North Dakota","Ohio","Oklahoma","Oregon","Pennsylvania","Rhode Island","South Carolina","South Dakota","Tennessee","Texas","Utah","Vermont","Virginia","Washington","West Virginia","Wisconsin","Wyoming","Washington D.C."];
 
@@ -68,7 +87,7 @@ const loadCases = () => {
   try { return JSON.parse(localStorage.getItem("sts_cases") || "[]"); } catch { return []; }
 };
 
-export default function App() {
+function App() {
   const [screen, setScreen] = useState("home"); // home|intake|loading|results|cases|chat
   const [step, setStep] = useState(1); // intake steps 1-4
   const [form, setForm] = useState({ category: "", situation: "", evidence: "", outcome: "", state: "", urgency: "" });
@@ -111,39 +130,132 @@ export default function App() {
     return URGENCY_KEYWORDS.some(k => lower.includes(k));
   };
 
+  const generateLetter = async () => {
+    if (!activeCase && !results) return;
+    const ctx = activeCase?.form || form;
+    try {
+      // optimistic UI
+      setResults(r => ({ ...(r||{}), demandLetter: "Generating demand letter..." }));
+      const resp = await fetch(LOCAL_LETTER, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ category: ctx.category, situation: ctx.situation, outcome: ctx.outcome, name: "[YOUR NAME]", address: "[YOUR ADDRESS]" })
+      });
+      if (!resp.ok) throw new Error(`Letter generation failed: ${resp.statusText}`);
+      const j = await resp.json();
+      const letter = j.letter || j.content || j;
+      setResults(r => ({ ...(r||{}), demandLetter: letter }));
+    } catch (e) {
+      setError(`Failed to generate letter: ${e.message}`);
+    }
+  };
+
+  const generateEmails = async () => {
+    if (!activeCase && !results) return;
+    const ctx = activeCase?.form || form;
+    try {
+      setResults(r => ({ ...(r||{}), emailSequence: [{ subject: "Generating...", body: "Please wait...", timing: "", tone: "", purpose: "" }] }));
+      const resp = await fetch(LOCAL_EMAILS, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ category: ctx.category, situation: ctx.situation, evidence: ctx.evidence, outcome: ctx.outcome, state: ctx.state })
+      });
+      if (!resp.ok) throw new Error(`Email generation failed: ${resp.statusText}`);
+      const j = await resp.json();
+      const emails = j.emailSequence || j;
+      setResults(r => ({ ...(r||{}), emailSequence: emails }));
+    } catch (e) {
+      setError(`Failed to generate emails: ${e.message}`);
+    }
+  };
+
 
   const callClaude = async (messages, system, maxTokens = 3000) => {
-    const res = await fetch(API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: maxTokens,
-        system,
-        messages,
-      }),
+    // if running locally we don't need API key or special headers
+    let init = { method: "POST", headers: {"Content-Type": "application/json"} };
+    if (!USE_LOCAL) {
+      ensureApiKey();
+      init.headers["anthropic-version"] = "2023-06-01";
+      init.headers["anthropic-dangerous-direct-browser-access"] = "true";
+      if (API_KEY) init.headers["x-api-key"] = API_KEY;
+    }
+    // attach body with prompt data
+    init.body = JSON.stringify({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: maxTokens,
+      system,
+      messages,
     });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data?.error?.message || `API error ${res.status}`);
-    return data.content.map(i => i.text || "").join("");
+    try {
+      const res = await fetch(API_URL, init);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error?.message || `API error ${res.status}`);
+      // handle both Claude format (array) and local model format (string)
+      let result = "";
+      if (typeof data.content === "string") {
+        result = data.content;
+      } else if (Array.isArray(data.content)) {
+        result = data.content.map(i => i.text || "").join("");
+      } else {
+        throw new Error("Unexpected response format from model");
+      }
+      return result;
+    } catch (e) {
+      console.error("fetch failed", e);
+      throw new Error(`Failed to fetch from ${API_URL}: ${e.message || e}`);
+    }
   };
 
   const buildCase = async () => {
+    if (USE_LOCAL) {
+      // quick ping to see if server is alive
+      try {
+        await fetch(LOCAL_ANALYZE, { method: "OPTIONS" });
+      } catch (e) {
+        setError(`Unable to reach local server at ${LOCAL_ANALYZE}. Make sure "python local_server.py" is running. (${e.message})`);
+        setScreen("intake");
+        return;
+      }
+    }
+
     setScreen("loading");
     setError("");
     try {
-      const prompt = `State: ${form.state || "Unknown"}
-Category: ${form.category}
-Situation: ${form.situation}
-Evidence available: ${form.evidence || "None specified"}
-Desired outcome: ${form.outcome || "Fair resolution"}
-Urgency indicators: ${detectUrgency(form.situation) ? "YES - time sensitive language detected" : "No"}`;
+      if (USE_LOCAL) {
+        // call local analyze endpoint for structured JSON
+        const resp = await fetch(LOCAL_ANALYZE, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ category: form.category, situation: form.situation, evidence: form.evidence, outcome: form.outcome, state: form.state })
+        });
+        if (!resp.ok) throw new Error(`Local analyze failed: ${resp.statusText}`);
+        const parsed = await resp.json();
+
+        const newCase = {
+          id: Date.now().toString(),
+          createdAt: new Date().toISOString(),
+          form: { ...form },
+          results: parsed,
+        };
+
+        saveCase(newCase);
+        setCases(loadCases());
+        setResults(parsed);
+        setActiveCase(newCase);
+        setChatMessages([{
+          role: "assistant",
+          content: `I've analyzed your case. You have a **${parsed.strengthScore}% strength score** — ${parsed.strengthReason}\n\n${parsed.summary}\n\nWhat questions do you have about your case or next steps?`
+        }]);
+        setActiveTab("overview");
+        setScreen("results");
+        return;
+      }
+
+      // Non-local (Claude) path
+      const prompt = `State: ${form.state || "Unknown"}\nCategory: ${form.category}\nSituation: ${form.situation}\nEvidence available: ${form.evidence || "None specified"}\nDesired outcome: ${form.outcome || "Fair resolution"}\nUrgency indicators: ${detectUrgency(form.situation) ? "YES - time sensitive language detected" : "No"}`;
 
       const text = await callClaude([{ role: "user", content: prompt }], SYSTEM_PROMPT, 8000);
+      // parse Claude's JSON response
       const firstBrace = text.indexOf("{");
       const lastBrace = text.lastIndexOf("}");
       if (firstBrace === -1 || lastBrace === -1) throw new Error("Model response was incomplete. Please try again.");
@@ -168,7 +280,11 @@ Urgency indicators: ${detectUrgency(form.situation) ? "YES - time sensitive lang
       setActiveTab("overview");
       setScreen("results");
     } catch (e) {
-      setError(`Error: ${e.message || "Something went wrong. Please try again."}`);
+      let msg = e.message || "Something went wrong. Please try again.";
+      if (msg.toLowerCase().includes("credit balance")) {
+        msg += "\n\nYour Anthropic account may be out of credits. Visit https://console.anthropic.com/ to purchase more or upgrade your plan.";
+      }
+      setError(`Error: ${msg}`);
       setScreen("intake");
     }
   };
@@ -181,13 +297,27 @@ Urgency indicators: ${detectUrgency(form.situation) ? "YES - time sensitive lang
     setChatInput("");
     setChatLoading(true);
     try {
-      const caseContext = `Case context: ${JSON.stringify(activeCase?.results?.summary || results?.summary)}. Category: ${form.category}. State: ${form.state}.`;
-      const text = await callClaude(
-        newMsgs.map(m => ({ role: m.role, content: m.content })),
-        CHAT_SYSTEM + "\n\n" + caseContext,
-        1000
-      );
-      setChatMessages(m => [...m, { role: "assistant", content: text }]);
+      let assistantResponse = "";
+      if (USE_LOCAL) {
+        // include system prompt + case context as system message
+        const caseContext = (activeCase?.results?.summary || results?.summary || "");
+        const systemMsg = { role: "system", content: CHAT_SYSTEM + "\n\nCase context: " + caseContext };
+        const payload = { messages: [systemMsg, ...newMsgs] };
+        const resp = await fetch(LOCAL_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+        if (!resp.ok) throw new Error(resp.statusText || "Local model error");
+        const data = await resp.json();
+        assistantResponse = data.content || String(data);
+      } else {
+        const caseContext = `Case context: ${JSON.stringify(activeCase?.results?.summary || results?.summary)}. Category: ${form.category}. State: ${form.state}.`;
+        const text = await callClaude(
+          newMsgs.map(m => ({ role: m.role, content: m.content })),
+          CHAT_SYSTEM + "\n\n" + caseContext,
+          1000
+        );
+        assistantResponse = text;
+      }
+
+      setChatMessages(m => [...m, { role: "assistant", content: assistantResponse }]);
     } catch(e) {
       setChatMessages(m => [...m, { role: "assistant", content: `Error: ${e.message}. Please try again.` }]);
     }
@@ -571,6 +701,9 @@ Urgency indicators: ${detectUrgency(form.situation) ? "YES - time sensitive lang
                       {copied === activeTab ? "✓ Copied" : "Copy"}
                     </button>
                     <button onClick={() => downloadDoc(activeTab === "letter" ? results.demandLetter : results.complaint, `${activeTab}.txt`)} style={S.smallBtn}>Download</button>
+                    {USE_LOCAL && activeTab === "letter" && (
+                      <button onClick={generateLetter} style={S.smallBtn}>Regenerate (AI)</button>
+                    )}
                   </div>
                 </div>
                 <div style={{ ...S.card, fontFamily: "'Courier New', monospace", fontSize: 13, lineHeight: 1.9, whiteSpace: "pre-wrap", color: "#ddd", position: "relative" }}>
@@ -582,7 +715,14 @@ Urgency indicators: ${detectUrgency(form.situation) ? "YES - time sensitive lang
 
             {activeTab === "emails" && (
               <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-                <h3 style={S.sectionTitle}>Email Sequence</h3>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <h3 style={S.sectionTitle}>Email Sequence</h3>
+                  <div>
+                    {USE_LOCAL && (
+                      <button onClick={generateEmails} style={S.smallBtn}>Regenerate (AI)</button>
+                    )}
+                  </div>
+                </div>
                 {results.emailSequence?.map((e, i) => (
                   <div key={i} style={S.card}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
@@ -757,6 +897,11 @@ Urgency indicators: ${detectUrgency(form.situation) ? "YES - time sensitive lang
 
   return null;
 }
+
+// expose App globally for browser script
+window.App = App;
+// automatically render once loaded
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 
 // ─── SHARED COMPONENTS ─────────────────────────────────────────────────────
 
