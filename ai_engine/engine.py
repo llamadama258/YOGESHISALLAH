@@ -8,14 +8,24 @@ from .models import (
     Message,
     DocumentType,
 )
+from .config import ConfigLoader
+from .clients import ModelRouter
 
 
 class AIEngine:
     """Core AI Engine for legal case analysis."""
     
-    def __init__(self, config: AIConfig):
-        """Initialize with configuration specifying local vs cloud mode."""
+    def __init__(self, config: Optional[AIConfig] = None):
+        """
+        Initialize with configuration specifying inference mode.
+        
+        If no config provided, will load from environment/env file.
+        """
+        if config is None:
+            config = ConfigLoader.load_config()
+        
         self.config = config
+        self.router = ModelRouter(config)
     
     def analyze_case_strength(self, case_context: CaseContext) -> StrengthAnalysis:
         """

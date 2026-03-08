@@ -75,8 +75,9 @@ class StrengthAnalysis:
 @dataclass
 class AIConfig:
     """Configuration for AI Engine."""
-    use_local: bool
-    model_name: str  # e.g., "claude-3-5-sonnet" or "llama-3-70b"
+    use_featherless: bool = False  # Use Featherless API
+    use_local: bool = False  # Use local model
+    model_name: str = ""  # e.g., "claude-3-5-sonnet", "llama-3-8b-instruct", or "llama-3-70b"
     api_key: Optional[str] = None
     local_model_path: Optional[str] = None
     max_tokens: int = 4096

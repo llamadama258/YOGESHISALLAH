@@ -238,6 +238,101 @@ class LocalModelClient(BaseModelClient):
         return prompt
 
 
+class FeatherlessClient(BaseModelClient):
+    """Client for Featherless API inference."""
+    
+    BASE_URL = "https://api.featherless.ai/v1"
+    
+    def __init__(self, config: AIConfig):
+        """
+        Initialize Featherless API client.
+        
+        Args:
+            config: AI configuration with API key and model settings
+        """
+        self.config = config
+        try:
+            from openai import OpenAI
+            self.client = OpenAI(
+                api_key=config.api_key,
+                base_url=self.BASE_URL
+            )
+        except ImportError:
+            raise ModelUnavailableError(
+                "OpenAI SDK not installed. Install with: pip install openai"
+            )
+        except Exception as e:
+            raise ModelUnavailableError(f"Failed to initialize Featherless client: {str(e)}")
+    
+    def complete(self, prompt: str, system_prompt: Optional[str] = None) -> str:
+        """
+        Generate completion using Featherless API with retry logic.
+        
+        Args:
+            prompt: User prompt
+            system_prompt: Optional system instructions
+            
+        Returns:
+            Model response text
+            
+        Raises:
+            RateLimitError: If API rate limits are exceeded
+            ModelUnavailableError: If model is unavailable or authentication fails
+            AIEngineError: For other API errors
+        """
+        max_retries = 3
+        retry_delay = 1  # seconds
+        
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        
+        for attempt in range(max_retries):
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.config.model_name,
+                    messages=messages,
+                    max_tokens=self.config.max_tokens,
+                    temperature=self.config.temperature
+                )
+                return response.choices[0].message.content
+                
+            except Exception as e:
+                error_str = str(e).lower()
+                
+                # Check for rate limit errors
+                if "rate limit" in error_str or "429" in error_str:
+                    if attempt < max_retries - 1:
+                        time.sleep(retry_delay)
+                        continue
+                    raise RateLimitError(
+                        "Featherless API rate limit exceeded. Please try again later."
+                    )
+                
+                # Check for authentication errors
+                if "authentication" in error_str or "401" in error_str or "api key" in error_str:
+                    raise ModelUnavailableError(
+                        "Invalid Featherless API credentials. Please check your FEATHERLESS_API_KEY."
+                    )
+                
+                # Check for connection/timeout errors
+                if any(keyword in error_str for keyword in ["connection", "timeout", "network"]):
+                    if attempt < max_retries - 1:
+                        time.sleep(retry_delay)
+                        continue
+                    raise ModelUnavailableError(
+                        "Featherless API is currently unavailable. Please try again later."
+                    )
+                
+                # For other errors, retry transient failures
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                    continue
+                
+                # Final attempt failed
+                raise AIEngineError(f"Featherless API error: {str(e)}")
+
 
 class ModelRouter:
     """Routes AI requests to appropriate model client based on configuration."""
@@ -246,15 +341,19 @@ class ModelRouter:
         """
         Initialize model router with configuration.
         
-        Selects and instantiates the appropriate client (local or cloud)
-        based on the USE_LOCAL flag in configuration.
+        Selects and instantiates the appropriate client based on configuration:
+        - Featherless API if use_featherless=True
+        - Local model if use_local=True
+        - Anthropic Claude otherwise
         
         Args:
             config: AI configuration specifying mode and model settings
         """
         self.config = config
         
-        if config.use_local:
+        if config.use_featherless:
+            self.client = FeatherlessClient(config)
+        elif config.use_local:
             self.client = LocalModelClient(config)
         else:
             self.client = ClaudeAPIClient(config)

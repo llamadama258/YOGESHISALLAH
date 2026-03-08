@@ -1,7 +1,23 @@
 # YOGESHISALLAH
 
 This workspace contains a single-page React app (`App.jsx` – previously `sue-the-system-pro (1).jsx`) that powers an "AI‑powered legal engine".
+## Setup
 
+### Create a .env file
+
+Create a `.env` file in the project root with your AI configuration:
+
+```env
+# Use Featherless API (recommended - low cost)
+USE_FEATHERLESS=true
+FEATHERLESS_API_KEY=your_api_key_here
+FEATHERLESS_MODEL=llama-3-8b-instruct
+
+# Alternative: Anthropic Claude
+# ANTHROPIC_API_KEY=your_api_key_here
+```
+
+**The `.env` file is in .gitignore - never commit real API keys!**
 ## Running in a browser
 
 You can open the UI directly in Chrome (or any modern browser) without a build step:

@@ -14,7 +14,7 @@ from .models import (
 )
 from .engine import AIEngine
 from .config import ConfigLoader
-from .clients import BaseModelClient, ClaudeAPIClient, LocalModelClient, ModelRouter
+from .clients import BaseModelClient, ClaudeAPIClient, LocalModelClient, FeatherlessClient, ModelRouter
 
 __all__ = [
     "AIConfig",
@@ -31,6 +31,7 @@ __all__ = [
     "ConfigLoader",
     "BaseModelClient",
     "ClaudeAPIClient",
+    "FeatherlessClient",
     "LocalModelClient",
     "ModelRouter",
 ]
