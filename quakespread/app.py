@@ -20,7 +20,7 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 from scipy.interpolate import NearestNDInterpolator
 
-from model import predict_batch
+from model import predict_batch, predict_damage
 
 load_dotenv()
 
@@ -228,6 +228,137 @@ def simulate():
 
     results.sort(key=lambda r: r["distance"])
     return jsonify(results)
+
+
+@app.route("/damage", methods=["POST"])
+def damage():
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "JSON body required"}), 400
+
+    lat = data.get("lat")
+    lng = data.get("lng")
+    magnitude = data.get("magnitude")
+    depth = data.get("depth")
+    avg_mmi = data.get("avg_mmi", 0)
+
+    if magnitude is None or depth is None:
+        return jsonify({"error": "magnitude and depth are required"}), 400
+
+    # Check if this matches a real USGS earthquake with PAGER data
+    real_pager = _fetch_real_pager(lat, lng, magnitude)
+    if real_pager:
+        real_pager["source"] = "real"
+        return jsonify(real_pager)
+
+    # Estimate population from magnitude/MMI (rough heuristic)
+    population = int(10 ** (magnitude - 2) * max(avg_mmi, 3) / 5.0 * 1000)
+
+    try:
+        result = predict_damage(magnitude, depth, avg_mmi, population)
+        result["source"] = "estimated"
+        result["population"] = population
+        return jsonify(result)
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 500
+    except Exception as e:
+        return jsonify({"error": f"Damage prediction failed: {e}"}), 500
+
+
+def _fetch_real_pager(lat, lng, magnitude):
+    """Check if a real USGS earthquake with PAGER data exists near this location."""
+    try:
+        params = {
+            "format": "geojson",
+            "latitude": lat,
+            "longitude": lng,
+            "maxradiuskm": 50,
+            "minmagnitude": magnitude - 0.5,
+            "maxmagnitude": magnitude + 0.5,
+            "producttype": "losspager",
+            "limit": 1,
+            "orderby": "time",
+        }
+        resp = requests.get(
+            "https://earthquake.usgs.gov/fdsnws/event/1/query",
+            params=params,
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        features = data.get("features", [])
+        if not features:
+            return None
+
+        feat = features[0]
+        event_id = feat["id"]
+        detail_url = feat["properties"].get("detail")
+        if not detail_url:
+            return None
+
+        # Fetch PAGER detail
+        detail_resp = requests.get(detail_url, timeout=10)
+        detail_resp.raise_for_status()
+        detail = detail_resp.json()
+
+        products = detail.get("properties", {}).get("products", {})
+        pager_list = products.get("losspager", [])
+        if not pager_list:
+            return None
+
+        pager_props = pager_list[0].get("properties", {})
+        alert = pager_props.get("alertlevel", "green")
+
+        # Extract what we can from PAGER
+        maxmmi = _safe_float(pager_props.get("maxmmi", 0))
+
+        return {
+            "fatalities": _pager_alert_to_fatalities(alert),
+            "injuries": _pager_alert_to_fatalities(alert) * 5,
+            "collapse_pct": _mmi_to_collapse(maxmmi),
+            "heavy_pct": _mmi_to_collapse(maxmmi) * 2.5,
+            "economic_loss_usd": _pager_alert_to_econ(alert),
+            "population": _safe_int(pager_props.get("maxmmi_population", 0)),
+            "alert_level": alert,
+            "event_id": event_id,
+        }
+    except Exception:
+        return None
+
+
+def _safe_float(v):
+    try:
+        return float(v)
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def _safe_int(v):
+    try:
+        return int(float(v))
+    except (ValueError, TypeError):
+        return 0
+
+
+def _pager_alert_to_fatalities(alert):
+    return {"green": 0, "yellow": 10, "orange": 100, "red": 1000}.get(alert, 0)
+
+
+def _pager_alert_to_econ(alert):
+    return {"green": 1e5, "yellow": 1e7, "orange": 1e9, "red": 1e10}.get(alert, 1e5)
+
+
+def _mmi_to_collapse(mmi):
+    if mmi < 6:
+        return 0.0
+    elif mmi < 7:
+        return round((mmi - 6) * 2, 2)
+    elif mmi < 8:
+        return round(2 + (mmi - 7) * 8, 2)
+    elif mmi < 9:
+        return round(10 + (mmi - 8) * 15, 2)
+    return round(25 + (mmi - 9) * 20, 2)
 
 
 @app.route("/recent")

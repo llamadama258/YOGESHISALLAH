@@ -15,7 +15,7 @@
         }
 
         .sidebar {
-            flex: 0 0 300px;
+            flex: 0 0 320px;
             background: #1e1e2e;
             color: #cdd6f4;
             padding: 24px 20px;
@@ -133,6 +133,74 @@
             color: #f38ba8;
         }
 
+        /* Damage stats panel */
+        #damage-panel {
+            display: none;
+            border-top: 1px solid #313244;
+            padding-top: 16px;
+        }
+
+        #damage-panel.visible {
+            display: block;
+        }
+
+        .source-badge {
+            display: inline-block;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+
+        .source-badge.real {
+            background: #a6e3a1;
+            color: #1e1e2e;
+        }
+
+        .source-badge.estimated {
+            background: #585b70;
+            color: #cdd6f4;
+        }
+
+        .chart-container {
+            width: 100%;
+            max-width: 260px;
+            margin: 0 auto 12px;
+        }
+
+        .stat-cards {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .stat-card {
+            background: #313244;
+            border-radius: 6px;
+            padding: 10px;
+            text-align: center;
+        }
+
+        .stat-card .stat-value {
+            font-size: 18px;
+            font-weight: 700;
+            color: #cdd6f4;
+        }
+
+        .stat-card .stat-label {
+            font-size: 10px;
+            color: #a6adc8;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 2px;
+        }
+
+        .stat-card.fatalities .stat-value { color: #f38ba8; }
+        .stat-card.injuries .stat-value { color: #fab387; }
+        .stat-card.economic .stat-value { color: #f9e2af; }
+        .stat-card.population .stat-value { color: #89b4fa; }
+
         .instructions {
             font-size: 12px;
             color: #6c7086;
@@ -243,6 +311,31 @@
 
             <div id="status">Click anywhere on the map to set an epicenter.</div>
 
+            <div id="damage-panel">
+                <span id="source-badge" class="source-badge"></span>
+                <div class="chart-container">
+                    <canvas id="damage-chart"></canvas>
+                </div>
+                <div class="stat-cards">
+                    <div class="stat-card population">
+                        <div class="stat-value" id="stat-population">--</div>
+                        <div class="stat-label">Exposed Pop.</div>
+                    </div>
+                    <div class="stat-card injuries">
+                        <div class="stat-value" id="stat-injuries">--</div>
+                        <div class="stat-label">Est. Injured</div>
+                    </div>
+                    <div class="stat-card fatalities">
+                        <div class="stat-value" id="stat-fatalities">--</div>
+                        <div class="stat-label">Est. Fatalities</div>
+                    </div>
+                    <div class="stat-card economic">
+                        <div class="stat-value" id="stat-economic">--</div>
+                        <div class="stat-label">Economic Loss</div>
+                    </div>
+                </div>
+            </div>
+
             <div class="instructions">
                 <strong>How to use:</strong><br>
                 1. Click the map to place an epicenter<br>
@@ -255,6 +348,7 @@
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
     <script src="/static/app.js"></script>
 </body>
 </html>

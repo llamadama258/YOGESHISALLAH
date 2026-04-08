@@ -24,6 +24,7 @@
     let recentLoaded = false;
     let faultLayer = null;
     let faultLoaded = false;
+    let damageChart = null;
 
     // DOM elements
     const magSlider = document.getElementById("magnitude");
@@ -120,6 +121,10 @@
                     [Math.max.apply(null, lats), Math.max.apply(null, lngs)],
                 ], { padding: [40, 40] });
                 animateHeatmap(points);
+
+                // Fetch damage stats
+                var maxMmi = getMaxIntensity(points);
+                fetchDamageStats(payload, maxMmi);
             })
             .catch(function (err) {
                 setStatus("Error: " + err.message, true);
@@ -403,6 +408,121 @@
     };
 
     legend.addTo(map);
+
+    // ---------------------------------------------------------------------------
+    // Damage stats — fetch + render
+    // ---------------------------------------------------------------------------
+    var damagePanel = document.getElementById("damage-panel");
+    var sourceBadge = document.getElementById("source-badge");
+
+    function fetchDamageStats(payload, avgMmi) {
+        fetch("/damage", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                lat: payload.lat,
+                lng: payload.lng,
+                magnitude: payload.magnitude,
+                depth: payload.depth,
+                avg_mmi: avgMmi,
+            }),
+        })
+            .then(function (resp) {
+                if (!resp.ok) return resp.json().then(function (d) { throw new Error(d.error); });
+                return resp.json();
+            })
+            .then(function (data) {
+                renderDamageStats(data);
+            })
+            .catch(function (err) {
+                console.error("Damage fetch error:", err);
+                damagePanel.classList.remove("visible");
+            });
+    }
+
+    function renderDamageStats(data) {
+        damagePanel.classList.add("visible");
+
+        // Source badge
+        if (data.source === "real") {
+            sourceBadge.textContent = "Real USGS Data";
+            sourceBadge.className = "source-badge real";
+        } else {
+            sourceBadge.textContent = "Estimated";
+            sourceBadge.className = "source-badge estimated";
+        }
+
+        // Stat cards
+        document.getElementById("stat-population").textContent = formatNumber(data.population || 0);
+        document.getElementById("stat-injuries").textContent = formatNumber(data.injuries || 0);
+        document.getElementById("stat-fatalities").textContent = formatNumber(data.fatalities || 0);
+        document.getElementById("stat-economic").textContent = formatUSD(data.economic_loss_usd || 0);
+
+        // Donut chart — building damage breakdown
+        var collapse = data.collapse_pct || 0;
+        var heavy = data.heavy_pct || 0;
+        var moderate = Math.min(heavy * 1.5, 100 - collapse - heavy);
+        var slight = Math.min(moderate * 1.2, 100 - collapse - heavy - moderate);
+        var none = Math.max(0, 100 - collapse - heavy - moderate - slight);
+
+        renderDamageChart(collapse, heavy, moderate, slight, none);
+    }
+
+    function renderDamageChart(collapse, heavy, moderate, slight, none) {
+        var ctx = document.getElementById("damage-chart").getContext("2d");
+
+        if (damageChart) {
+            damageChart.destroy();
+        }
+
+        damageChart = new Chart(ctx, {
+            type: "doughnut",
+            data: {
+                labels: ["Collapsed", "Heavy Damage", "Moderate", "Slight", "None"],
+                datasets: [{
+                    data: [collapse, heavy, moderate, slight, none],
+                    backgroundColor: ["#e53935", "#fb8c00", "#fdd835", "#7cb342", "#585b70"],
+                    borderWidth: 0,
+                }],
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                cutout: "55%",
+                plugins: {
+                    legend: {
+                        position: "bottom",
+                        labels: {
+                            color: "#a6adc8",
+                            font: { size: 10 },
+                            padding: 8,
+                            boxWidth: 12,
+                        },
+                    },
+                    title: {
+                        display: true,
+                        text: "Building Damage Breakdown",
+                        color: "#cdd6f4",
+                        font: { size: 13, weight: "600" },
+                        padding: { bottom: 8 },
+                    },
+                },
+            },
+        });
+    }
+
+    function formatNumber(n) {
+        if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
+        if (n >= 1e3) return (n / 1e3).toFixed(1) + "K";
+        return n.toLocaleString();
+    }
+
+    function formatUSD(n) {
+        if (n >= 1e9) return "$" + (n / 1e9).toFixed(1) + "B";
+        if (n >= 1e6) return "$" + (n / 1e6).toFixed(1) + "M";
+        if (n >= 1e3) return "$" + (n / 1e3).toFixed(0) + "K";
+        return "$" + n.toFixed(0);
+    }
 
     // ---------------------------------------------------------------------------
     // Status helper
