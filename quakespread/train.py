@@ -38,7 +38,7 @@ FEATURE_COLS = ["magnitude", "depth", "distance", "vs30", "azimuth"]
 TARGET_COL = "mmi"
 ALL_COLS = FEATURE_COLS + [TARGET_COL, "event_id"]
 
-REQUEST_DELAY = 0.5
+REQUEST_DELAY = 0.2
 MAX_RETRIES = 3
 RETRY_BACKOFF = 2
 MIN_SAMPLES = 1000
@@ -83,7 +83,7 @@ def fetch_with_retry(url, params=None, timeout=30):
 def query_earthquakes():
     """Query USGS FDSNWS for M4.0+ earthquakes with ShakeMap data."""
     end_time = datetime.utcnow()
-    start_time = end_time - timedelta(days=5 * 365)
+    start_time = end_time - timedelta(days=2 * 365)
 
     all_events = []
     offset = 1
