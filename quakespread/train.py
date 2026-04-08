@@ -174,6 +174,21 @@ def parse_shakemap_grid(xml_text, event):
         eq_depth = event["depth"]
         eq_mag = event["magnitude"]
 
+    # Discover column indices dynamically from <grid_field> elements
+    col_index = {}
+    for field_elem in root.findall(f"{ns}grid_field"):
+        name = field_elem.get("name", "").upper()
+        idx = field_elem.get("index")
+        if idx is not None:
+            col_index[name] = int(idx) - 1  # XML indices are 1-based
+
+    lon_col = col_index.get("LON", 0)
+    lat_col = col_index.get("LAT", 1)
+    # MMI may be labeled MMI or INTENSITY
+    mmi_col = col_index.get("MMI", col_index.get("INTENSITY", 4))
+    # VS30 may be labeled SVEL, VS30, or SVEL_ROCK
+    vs30_col = col_index.get("SVEL", col_index.get("VS30", col_index.get("SVEL_ROCK", None)))
+
     # Parse grid data
     grid_data_elem = root.find(f"{ns}grid_data")
     if grid_data_elem is None or not grid_data_elem.text:
@@ -184,13 +199,12 @@ def parse_shakemap_grid(xml_text, event):
         if not line:
             continue
         parts = line.split()
-        if len(parts) < 11:
-            continue
         try:
-            lon = float(parts[0])
-            lat = float(parts[1])
-            mmi = float(parts[4])
-            vs30 = float(parts[10])
+            lon = float(parts[lon_col])
+            lat = float(parts[lat_col])
+            mmi = float(parts[mmi_col])
+            # Use VS30 if available, otherwise default to 360 m/s
+            vs30 = float(parts[vs30_col]) if vs30_col is not None and vs30_col < len(parts) else 360.0
         except (ValueError, IndexError):
             continue
 
