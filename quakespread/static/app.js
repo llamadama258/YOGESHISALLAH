@@ -134,6 +134,22 @@
         1.0: "#b71c1c",
     };
 
+    // Convert 6km (slightly above 5km grid spacing) to pixels at current zoom
+    function getHeatRadius() {
+        var zoom = map.getZoom();
+        var lat = epicenterLatLng ? epicenterLatLng.lat : 36.7;
+        var metersPerPixel = (40075016.686 * Math.cos(lat * Math.PI / 180)) / Math.pow(2, zoom + 8);
+        return Math.max(4, Math.min(60, 6000 / metersPerPixel));
+    }
+
+    // Update radius when user zooms
+    map.on("zoomend", function () {
+        if (heatLayer) {
+            heatLayer.setOptions({ radius: getHeatRadius() });
+            heatLayer.redraw();
+        }
+    });
+
     function animateHeatmap(points) {
         clearAnimation();
 
@@ -142,19 +158,18 @@
         points.forEach(function (p) {
             var ringIdx = Math.floor(p.distance / 10);
             if (!rings[ringIdx]) rings[ringIdx] = [];
-            rings[ringIdx].push([p.lat, p.lng, p.intensity]);
+            rings[ringIdx].push([p.lat, p.lng, p.intensity / 10]);
         });
 
         var ringKeys = Object.keys(rings)
             .map(Number)
             .sort(function (a, b) { return a - b; });
 
-        // Create heat layer
+        // Create heat layer with geographically correct radius
         heatLayer = L.heatLayer([], {
-            radius: 20,
-            blur: 15,
-            maxZoom: 10,
-            max: 10,
+            radius: getHeatRadius(),
+            blur: 12,
+            max: 1.0,
             gradient: heatGradient,
         }).addTo(map);
 

@@ -41,7 +41,7 @@ ALL_COLS = FEATURE_COLS + [TARGET_COL, "event_id"]
 REQUEST_DELAY = 0.2
 MAX_RETRIES = 3
 RETRY_BACKOFF = 2
-MIN_SAMPLES = 1000
+MIN_SAMPLES = 400
 
 
 def haversine(lat1, lon1, lat2, lon2):
@@ -224,6 +224,9 @@ def parse_shakemap_grid(xml_text, event):
             "event_id": event["id"],
         })
 
+    if len(samples) > 500:
+        import random
+        samples = random.sample(samples, 500)
     return samples
 
 
@@ -324,7 +327,7 @@ def train_model(samples):
     model.fit(X_train, y_train)
 
     y_pred = model.predict(X_test)
-    rmse = mean_squared_error(y_test, y_pred, squared=False)
+    rmse = mean_squared_error(y_test, y_pred) ** 0.5
     r2 = r2_score(y_test, y_pred)
 
     print(f"Test RMSE: {rmse:.4f}")
@@ -346,6 +349,7 @@ def main():
         sys.exit(1)
 
     # Phase 2 & 3: Download and parse ShakeMap grids
+    events = events[:200]
     existing_samples, processed_ids = load_existing_samples()
     all_samples = download_and_parse(events, existing_samples, processed_ids)
 

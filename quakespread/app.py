@@ -213,15 +213,15 @@ def simulate():
     except Exception as e:
         return jsonify({"error": f"Prediction failed: {e}"}), 500
 
-    # Apply VS30 amplification, filter, and sort
+    # Filter and sort — VS30 amplification already encoded in model predictions
     results = []
-    for p, mmi, vs30 in zip(grid_points, predictions, all_vs30):
-        adjusted = apply_vs30_amplification(mmi, float(vs30))
-        if adjusted >= 2.0:
+    for p, mmi in zip(grid_points, predictions):
+        mmi = max(1.0, min(10.0, mmi))
+        if mmi >= 2.0:
             results.append({
                 "lat": p["lat"],
                 "lng": p["lng"],
-                "intensity": round(adjusted, 2),
+                "intensity": round(mmi, 2),
                 "distance": round(p["distance"], 2),
             })
 
