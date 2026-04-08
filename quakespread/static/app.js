@@ -1,0 +1,296 @@
+// QuakeSpread — Leaflet Map Logic + Animation
+
+(function () {
+    "use strict";
+
+    // ---------------------------------------------------------------------------
+    // Map initialization
+    // ---------------------------------------------------------------------------
+    const map = L.map("map").setView([36.7, -119.8], 6);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        maxZoom: 18,
+    }).addTo(map);
+
+    // ---------------------------------------------------------------------------
+    // State
+    // ---------------------------------------------------------------------------
+    let epicenterMarker = null;
+    let epicenterLatLng = null;
+    let heatLayer = null;
+    let animationTimeouts = [];
+    let recentLayer = null;
+    let recentLoaded = false;
+
+    // DOM elements
+    const magSlider = document.getElementById("magnitude");
+    const depthSlider = document.getElementById("depth");
+    const magValue = document.getElementById("mag-value");
+    const depthValue = document.getElementById("depth-value");
+    const simulateBtn = document.getElementById("simulate-btn");
+    const recentToggle = document.getElementById("recent-toggle");
+    const statusDiv = document.getElementById("status");
+
+    // ---------------------------------------------------------------------------
+    // Slider live updates
+    // ---------------------------------------------------------------------------
+    magSlider.addEventListener("input", function () {
+        magValue.textContent = this.value;
+    });
+
+    depthSlider.addEventListener("input", function () {
+        depthValue.textContent = this.value;
+    });
+
+    // ---------------------------------------------------------------------------
+    // Epicenter selection
+    // ---------------------------------------------------------------------------
+    const epicenterIcon = L.divIcon({
+        className: "epicenter-icon",
+        html: '<div style="width:20px;height:20px;border:3px solid #f38ba8;border-radius:50%;background:rgba(243,139,168,0.3);position:relative;"><div style="position:absolute;top:50%;left:50%;width:8px;height:8px;background:#f38ba8;border-radius:50%;transform:translate(-50%,-50%);"></div></div>',
+        iconSize: [20, 20],
+        iconAnchor: [10, 10],
+    });
+
+    map.on("click", function (e) {
+        epicenterLatLng = e.latlng;
+
+        if (epicenterMarker) {
+            epicenterMarker.setLatLng(e.latlng);
+        } else {
+            epicenterMarker = L.marker(e.latlng, { icon: epicenterIcon }).addTo(map);
+        }
+
+        simulateBtn.disabled = false;
+        simulateBtn.textContent = "Simulate";
+        setStatus(
+            "Epicenter set at " +
+            e.latlng.lat.toFixed(4) + ", " +
+            e.latlng.lng.toFixed(4)
+        );
+    });
+
+    // ---------------------------------------------------------------------------
+    // Simulate
+    // ---------------------------------------------------------------------------
+    simulateBtn.addEventListener("click", function () {
+        if (!epicenterLatLng) return;
+
+        simulateBtn.disabled = true;
+        simulateBtn.textContent = "Simulating...";
+        setStatus("Running simulation...");
+        clearAnimation();
+
+        const payload = {
+            lat: epicenterLatLng.lat,
+            lng: epicenterLatLng.lng,
+            magnitude: parseFloat(magSlider.value),
+            depth: parseFloat(depthSlider.value),
+        };
+
+        fetch("/simulate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+        })
+            .then(function (resp) {
+                if (!resp.ok) {
+                    return resp.json().then(function (d) {
+                        throw new Error(d.error || "Simulation failed");
+                    });
+                }
+                return resp.json();
+            })
+            .then(function (points) {
+                if (!points.length) {
+                    setStatus("No significant shaking predicted at this magnitude/depth.");
+                    simulateBtn.disabled = false;
+                    simulateBtn.textContent = "Simulate";
+                    return;
+                }
+                setStatus(points.length + " grid points received. Animating...");
+                animateHeatmap(points);
+            })
+            .catch(function (err) {
+                setStatus("Error: " + err.message, true);
+                simulateBtn.disabled = false;
+                simulateBtn.textContent = "Simulate";
+            });
+    });
+
+    // ---------------------------------------------------------------------------
+    // Heatmap animation — concentric rings spreading outward
+    // ---------------------------------------------------------------------------
+    const heatGradient = {
+        0.1: "#43a047",
+        0.2: "#7cb342",
+        0.3: "#c0ca33",
+        0.4: "#fdd835",
+        0.5: "#ffb300",
+        0.6: "#fb8c00",
+        0.7: "#f4511e",
+        0.8: "#e53935",
+        1.0: "#b71c1c",
+    };
+
+    function animateHeatmap(points) {
+        clearAnimation();
+
+        // Group points into 10km-wide distance rings
+        var rings = {};
+        points.forEach(function (p) {
+            var ringIdx = Math.floor(p.distance / 10);
+            if (!rings[ringIdx]) rings[ringIdx] = [];
+            rings[ringIdx].push([p.lat, p.lng, p.intensity]);
+        });
+
+        var ringKeys = Object.keys(rings)
+            .map(Number)
+            .sort(function (a, b) { return a - b; });
+
+        // Create heat layer
+        heatLayer = L.heatLayer([], {
+            radius: 20,
+            blur: 15,
+            maxZoom: 10,
+            max: 10,
+            gradient: heatGradient,
+        }).addTo(map);
+
+        var cumulativeData = [];
+
+        ringKeys.forEach(function (key, i) {
+            var timeout = setTimeout(function () {
+                cumulativeData = cumulativeData.concat(rings[key]);
+                heatLayer.setLatLngs(cumulativeData);
+
+                // Re-enable button after last ring
+                if (i === ringKeys.length - 1) {
+                    simulateBtn.disabled = false;
+                    simulateBtn.textContent = "Simulate";
+                    setStatus(
+                        "Simulation complete. " +
+                        cumulativeData.length + " points rendered. " +
+                        "Max intensity: " + getMaxIntensity(points).toFixed(1) + " MMI"
+                    );
+                }
+            }, i * 80);
+
+            animationTimeouts.push(timeout);
+        });
+    }
+
+    function clearAnimation() {
+        animationTimeouts.forEach(clearTimeout);
+        animationTimeouts = [];
+        if (heatLayer) {
+            map.removeLayer(heatLayer);
+            heatLayer = null;
+        }
+    }
+
+    function getMaxIntensity(points) {
+        var max = 0;
+        points.forEach(function (p) {
+            if (p.intensity > max) max = p.intensity;
+        });
+        return max;
+    }
+
+    // ---------------------------------------------------------------------------
+    // Recent earthquakes layer
+    // ---------------------------------------------------------------------------
+    recentToggle.addEventListener("change", function () {
+        if (this.checked) {
+            if (!recentLoaded) {
+                loadRecentEarthquakes();
+            } else if (recentLayer) {
+                map.addLayer(recentLayer);
+            }
+        } else {
+            if (recentLayer) {
+                map.removeLayer(recentLayer);
+            }
+        }
+    });
+
+    function loadRecentEarthquakes() {
+        setStatus("Loading recent earthquakes...");
+
+        fetch("/recent")
+            .then(function (resp) {
+                if (!resp.ok) throw new Error("Failed to load recent earthquakes");
+                return resp.json();
+            })
+            .then(function (geojson) {
+                recentLayer = L.layerGroup();
+
+                (geojson.features || []).forEach(function (feat) {
+                    var coords = feat.geometry.coordinates;
+                    var props = feat.properties;
+                    var mag = props.mag || 0;
+                    var lat = coords[1];
+                    var lng = coords[0];
+                    var depth = coords[2];
+
+                    var radius = Math.min(Math.pow(2, mag) * 0.5, 30);
+
+                    var marker = L.circleMarker([lat, lng], {
+                        radius: radius,
+                        fillColor: "#ff6600",
+                        color: "#333",
+                        weight: 1,
+                        fillOpacity: 0.6,
+                    });
+
+                    var date = new Date(props.time).toLocaleString();
+                    marker.bindPopup(
+                        "<strong>M" + mag.toFixed(1) + "</strong><br>" +
+                        (props.place || "Unknown location") + "<br>" +
+                        "Depth: " + (depth ? depth.toFixed(1) : "?") + " km<br>" +
+                        date
+                    );
+
+                    recentLayer.addLayer(marker);
+                });
+
+                recentLayer.addTo(map);
+                recentLoaded = true;
+                setStatus(
+                    geojson.features.length + " recent earthquakes loaded (M3.0+ last 30 days)."
+                );
+            })
+            .catch(function (err) {
+                setStatus("Error loading recent earthquakes: " + err.message, true);
+                recentToggle.checked = false;
+            });
+    }
+
+    // ---------------------------------------------------------------------------
+    // MMI Legend
+    // ---------------------------------------------------------------------------
+    var legend = L.control({ position: "bottomleft" });
+
+    legend.onAdd = function () {
+        var div = L.DomUtil.create("div", "mmi-legend");
+        div.innerHTML =
+            '<div class="title">MMI Intensity Scale</div>' +
+            '<div class="gradient-bar"></div>' +
+            '<div class="ticks">' +
+            "<span>2</span><span>3</span><span>4</span><span>5</span>" +
+            "<span>6</span><span>7</span><span>8</span><span>9</span><span>10</span>" +
+            "</div>";
+        return div;
+    };
+
+    legend.addTo(map);
+
+    // ---------------------------------------------------------------------------
+    // Status helper
+    // ---------------------------------------------------------------------------
+    function setStatus(msg, isError) {
+        statusDiv.textContent = msg;
+        statusDiv.className = isError ? "error" : "";
+    }
+})();

@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QuakeSpread — Earthquake Damage Simulation</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { height: 100%; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+
+        .container {
+            display: flex;
+            height: 100%;
+        }
+
+        .sidebar {
+            flex: 0 0 300px;
+            background: #1e1e2e;
+            color: #cdd6f4;
+            padding: 24px 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            overflow-y: auto;
+        }
+
+        .sidebar h1 {
+            font-size: 24px;
+            color: #f38ba8;
+            letter-spacing: 1px;
+        }
+
+        .sidebar h1 span {
+            color: #fab387;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .control-group label {
+            font-size: 13px;
+            color: #a6adc8;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .control-group .value {
+            font-size: 18px;
+            font-weight: 600;
+            color: #cdd6f4;
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            background: #313244;
+            outline: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #f38ba8;
+            cursor: pointer;
+        }
+
+        input[type="range"]::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #f38ba8;
+            cursor: pointer;
+            border: none;
+        }
+
+        #simulate-btn {
+            padding: 12px;
+            font-size: 16px;
+            font-weight: 600;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            background: linear-gradient(135deg, #f38ba8, #fab387);
+            color: #1e1e2e;
+            transition: opacity 0.2s, transform 0.1s;
+        }
+
+        #simulate-btn:hover:not(:disabled) {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+
+        #simulate-btn:disabled {
+            background: #45475a;
+            color: #6c7086;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .toggle-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .toggle-group input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: #f38ba8;
+        }
+
+        .toggle-group label {
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        #status {
+            font-size: 13px;
+            color: #a6adc8;
+            min-height: 40px;
+            line-height: 1.4;
+        }
+
+        #status.error {
+            color: #f38ba8;
+        }
+
+        .instructions {
+            font-size: 12px;
+            color: #6c7086;
+            line-height: 1.5;
+            border-top: 1px solid #313244;
+            padding-top: 16px;
+            margin-top: auto;
+        }
+
+        #map {
+            flex: 1;
+            height: 100%;
+        }
+
+        /* MMI Legend */
+        .mmi-legend {
+            background: rgba(30, 30, 46, 0.92);
+            padding: 10px 14px;
+            border-radius: 8px;
+            color: #cdd6f4;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+
+        .mmi-legend .title {
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        .mmi-legend .gradient-bar {
+            width: 200px;
+            height: 14px;
+            border-radius: 3px;
+            background: linear-gradient(to right,
+                #43a047,
+                #7cb342,
+                #c0ca33,
+                #fdd835,
+                #ffb300,
+                #fb8c00,
+                #f4511e,
+                #e53935,
+                #b71c1c
+            );
+        }
+
+        .mmi-legend .ticks {
+            display: flex;
+            justify-content: space-between;
+            width: 200px;
+            margin-top: 2px;
+            font-size: 10px;
+            color: #a6adc8;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <h1>Quake<span>Spread</span></h1>
+
+            <div class="control-group">
+                <label>Magnitude</label>
+                <span class="value">M <span id="mag-value">5.0</span></span>
+                <input type="range" id="magnitude" min="3.0" max="9.0" step="0.1" value="5.0">
+            </div>
+
+            <div class="control-group">
+                <label>Depth (km)</label>
+                <span class="value"><span id="depth-value">10</span> km</span>
+                <input type="range" id="depth" min="0" max="100" step="1" value="10">
+            </div>
+
+            <button id="simulate-btn" disabled>Select epicenter on map</button>
+
+            <div class="toggle-group">
+                <input type="checkbox" id="recent-toggle">
+                <label for="recent-toggle">Show Recent Earthquakes</label>
+            </div>
+
+            <div id="status">Click anywhere on the map to set an epicenter.</div>
+
+            <div class="instructions">
+                <strong>How to use:</strong><br>
+                1. Click the map to place an epicenter<br>
+                2. Adjust magnitude and depth<br>
+                3. Click Simulate to see shaking spread
+            </div>
+        </div>
+        <div id="map"></div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+    <script src="/static/app.js"></script>
+</body>
+</html>
