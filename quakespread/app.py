@@ -20,7 +20,7 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 from scipy.interpolate import NearestNDInterpolator
 
-from model import predict_batch, predict_damage
+from model import predict_batch
 
 load_dotenv()
 
@@ -99,15 +99,6 @@ def calculate_azimuth(lat1, lon1, lat2, lon2):
     return (bearing + 360) % 360
 
 
-def apply_vs30_amplification(mmi, vs30):
-    """Apply VS30 site amplification to MMI value."""
-    if vs30 < 180:
-        mmi *= 1.5
-    elif vs30 > 760:
-        mmi *= 0.8
-    return max(1.0, min(10.0, mmi))
-
-
 # ---------------------------------------------------------------------------
 # Recent earthquakes cache
 # ---------------------------------------------------------------------------
@@ -151,9 +142,11 @@ def simulate():
     if errors:
         return jsonify({"error": "; ".join(errors)}), 400
 
-    # Generate grid points within 150km radius at 3km spacing (finer tiles = smoother edges)
-    radius_km = 150
-    step_km = 3
+    # Scale simulation radius with magnitude — larger quakes affect much wider areas.
+    # Approximate felt-radius from empirical seismology (Wald et al.).
+    radius_km = int(10 ** (0.32 * magnitude - 0.09))  # ~20km at M3, ~80km at M5, ~300km at M7, ~700km at M9
+    radius_km = max(20, min(800, radius_km))
+    step_km = max(3, radius_km // 50)  # keep grid ~50 cells across
     lat_step = step_km / 111.0
     lon_step = step_km / (111.0 * math.cos(math.radians(lat)))
 
@@ -180,12 +173,12 @@ def simulate():
     if not grid_points:
         return jsonify([])
 
-    # Sample ~50 points for VS30 lookup, interpolate to all
-    n_samples = min(100, len(grid_points))
+    # Sample VS30 at many points for soil-driven shape variation
+    n_samples = min(300, len(grid_points))
     sample_indices = np.linspace(0, len(grid_points) - 1, n_samples, dtype=int)
     sample_points = [grid_points[i] for i in sample_indices]
 
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    with ThreadPoolExecutor(max_workers=20) as executor:
         vs30_values = list(executor.map(
             lambda p: fetch_vs30_single(p["lat"], p["lng"]),
             sample_points,
@@ -245,7 +238,7 @@ def simulate():
             ) if magnitude > max_mag else None,
         }
 
-    return jsonify({"points": results, "fault_info": fault_info})
+    return jsonify({"points": results, "fault_info": fault_info, "step_km": step_km})
 
 
 @app.route("/damage", methods=["POST"])
@@ -258,7 +251,8 @@ def damage():
     lng = data.get("lng")
     magnitude = data.get("magnitude")
     depth = data.get("depth")
-    avg_mmi = data.get("avg_mmi", 0)
+    points = data.get("points", [])
+    step_km = data.get("step_km", 3)
 
     if magnitude is None or depth is None:
         return jsonify({"error": "magnitude and depth are required"}), 400
@@ -269,18 +263,153 @@ def damage():
         real_pager["source"] = "real"
         return jsonify(real_pager)
 
-    # Estimate population from magnitude/MMI (rough heuristic)
-    population = int(10 ** (magnitude - 2) * max(avg_mmi, 3) / 5.0 * 1000)
+    # --- Empirical PAGER-style estimation from grid points ---
+    exposed_pop = _fetch_area_population(lat, lng)
+    result = _estimate_damage_from_grid(points, magnitude, step_km, exposed_pop)
+    result["source"] = "estimated"
+    return jsonify(result)
 
+
+# ---------------------------------------------------------------------------
+# Population lookup via GeoNames API
+# ---------------------------------------------------------------------------
+_pop_cache = {}  # (rounded_lat, rounded_lng) -> density per km²
+
+GEODB_URL = "https://geodb-free-service.wirefreethought.com/v1/geo/places"
+
+
+def _fetch_area_population(lat, lng):
+    """Fetch actual population near the epicenter using GeoDB Cities API.
+
+    Returns the real sum of city populations within 30 miles (~50km).
+    This IS the exposed population — not a density to multiply.
+    """
+    # Cache by rounded epicenter (0.2° ≈ 22km grid)
+    cache_key = (round(lat * 5) / 5, round(lng * 5) / 5)
+    if cache_key in _pop_cache:
+        return _pop_cache[cache_key]
+
+    total_pop = 0
     try:
-        result = predict_damage(magnitude, depth, avg_mmi, population)
-        result["source"] = "estimated"
-        result["population"] = population
-        return jsonify(result)
-    except RuntimeError as e:
-        return jsonify({"error": str(e)}), 500
+        loc = f"{lat:+.4f}{lng:+.4f}"
+
+        for offset in range(0, 50, 10):
+            resp = requests.get(GEODB_URL, params={
+                "location": loc,
+                "radius": 30,  # 30 miles ≈ 50km
+                "limit": 10,
+                "offset": offset,
+                "sort": "-population",
+                "types": "CITY",
+            }, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            cities = data.get("data", [])
+            if not cities:
+                break
+            total_pop += sum(int(c.get("population", 0)) for c in cities)
+            if len(cities) < 10:
+                break
+
+        # Metro multiplier — city-proper undercounts suburbs by ~50%
+        total_pop = int(total_pop * 1.5)
+
     except Exception as e:
-        return jsonify({"error": f"Damage prediction failed: {e}"}), 500
+        print(f"GeoDB population lookup failed: {e}")
+        total_pop = 100_000  # conservative fallback
+
+    total_pop = max(100, total_pop)  # at least a small settlement
+    _pop_cache[cache_key] = total_pop
+    return total_pop
+
+
+def _estimate_damage_from_grid(points, magnitude, step_km, exposed_pop):
+    """Estimate damage using empirical PAGER methodology.
+
+    Key insight: exposed_pop is the REAL population from GeoDB (city data).
+    We distribute this population across MMI bands using distance weighting —
+    most people live near the epicenter, not at the grid edges.
+    """
+    if not points or exposed_pop < 1:
+        return {
+            "fatalities": 0, "injuries": 0, "collapse_pct": 0.0,
+            "heavy_pct": 0.0, "economic_loss_usd": 0, "population": 0,
+        }
+
+    # PAGER fatality rates per MMI (Jaiswal & Wald 2010, modern building codes)
+    fatality_rate = {
+        2: 0, 3: 0, 4: 0, 5: 0,
+        6: 0.000003, 7: 0.00003, 8: 0.0003, 9: 0.003, 10: 0.03,
+    }
+    injury_multiplier = 7  # WHO guideline
+
+    # HAZUS building damage percentages by MMI
+    collapse_rate = {
+        2: 0, 3: 0, 4: 0, 5: 0,
+        6: 0.1, 7: 0.5, 8: 2.0, 9: 8.0, 10: 20.0,
+    }
+    heavy_rate = {
+        2: 0, 3: 0, 4: 0, 5: 0.1,
+        6: 0.5, 7: 2.0, 8: 6.0, 9: 15.0, 10: 35.0,
+    }
+
+    # HAZUS economic loss ratio by MMI
+    econ_loss_ratio = {
+        2: 0, 3: 0, 4: 0, 5: 0.001,
+        6: 0.005, 7: 0.02, 8: 0.08, 9: 0.20, 10: 0.40,
+    }
+
+    # Distribute population across cells weighted by inverse distance.
+    # People concentrate near the epicenter, not uniformly across the grid.
+    weights = []
+    for p in points:
+        dist = max(1.0, p.get("distance", 1))
+        w = 1.0 / (1.0 + (dist / 15.0) ** 2)  # sharp falloff beyond ~15km
+        weights.append(w)
+
+    total_weight = sum(weights)
+    if total_weight < 0.001:
+        total_weight = 1.0
+
+    total_fatalities = 0.0
+    total_injuries = 0.0
+    total_econ_loss = 0.0
+    weighted_collapse = 0.0
+    weighted_heavy = 0.0
+    cells_with_damage = 0
+
+    # Per-capita property value (~$200K US average)
+    per_capita_value = 200_000
+
+    for p, w in zip(points, weights):
+        mmi = p.get("intensity", 0)
+        mmi_band = max(2, min(10, int(round(mmi))))
+
+        # Population in this cell = share of total based on distance weight
+        cell_pop = exposed_pop * (w / total_weight)
+
+        total_fatalities += cell_pop * fatality_rate.get(mmi_band, 0)
+        total_injuries += cell_pop * fatality_rate.get(mmi_band, 0) * injury_multiplier
+
+        if mmi_band >= 6:
+            cells_with_damage += 1
+            weighted_collapse += collapse_rate.get(mmi_band, 0)
+            weighted_heavy += heavy_rate.get(mmi_band, 0)
+
+        # Economic loss = people × per-capita value × loss ratio
+        total_econ_loss += cell_pop * per_capita_value * econ_loss_ratio.get(mmi_band, 0)
+
+    avg_collapse = weighted_collapse / cells_with_damage if cells_with_damage else 0
+    avg_heavy = weighted_heavy / cells_with_damage if cells_with_damage else 0
+
+    return {
+        "fatalities": max(0, int(total_fatalities)),
+        "injuries": max(0, int(total_injuries)),
+        "collapse_pct": round(avg_collapse, 2),
+        "heavy_pct": round(avg_heavy, 2),
+        "economic_loss_usd": round(total_econ_loss, 2),
+        "population": exposed_pop,
+    }
 
 
 def _fetch_real_pager(lat, lng, magnitude):

@@ -57,7 +57,7 @@
     });
 
     map.on("click", function (e) {
-        epicenterLatLng = e.latlng;
+        epicenterLatLng = e.latlng.wrap();
 
         if (epicenterMarker) {
             epicenterMarker.setLatLng(e.latlng);
@@ -108,6 +108,7 @@
             .then(function (resp) {
                 var points = resp.points;
                 var faultInfo = resp.fault_info;
+                if (resp.step_km) cellSizeKm = resp.step_km;
 
                 // Show fault proximity info
                 if (faultInfo) {
@@ -135,9 +136,8 @@
                 ], { padding: [40, 40] });
                 animateChoropleth(points);
 
-                // Fetch damage stats
-                var maxMmi = Math.max.apply(null, points.map(function(p) { return p.intensity; }));
-                fetchDamageStats(payload, maxMmi);
+                // Fetch damage stats — pass grid points so backend can compute real area
+                fetchDamageStats(payload, points);
             })
             .catch(function (err) {
                 setStatus("Error: " + err.message, true);
@@ -178,10 +178,11 @@
         return "rgb(183,28,28)";
     }
 
-    // Build a 3km × 3km GeoJSON polygon tile for a grid point
+    // Build a GeoJSON polygon tile for a grid point, sized to match server grid spacing
+    var cellSizeKm = 3;  // default, updated from server response
     function makeCell(p) {
-        var latHalf = (3 / 111.0) / 2;
-        var lonHalf = (3 / (111.0 * Math.cos(p.lat * Math.PI / 180))) / 2;
+        var latHalf = (cellSizeKm / 111.0) / 2;
+        var lonHalf = (cellSizeKm / (111.0 * Math.cos(p.lat * Math.PI / 180))) / 2;
         return {
             type: "Feature",
             geometry: {
@@ -303,8 +304,34 @@
                         "<strong>M" + mag.toFixed(1) + "</strong><br>" +
                         (props.place || "Unknown location") + "<br>" +
                         "Depth: " + (depth ? depth.toFixed(1) : "?") + " km<br>" +
-                        date
+                        date + "<br><br>" +
+                        "<em>Click to simulate this earthquake</em>"
                     );
+
+                    // Click recent earthquake → auto-simulate with its real params
+                    (function (eLat, eLng, eMag, eDepth) {
+                        marker.on("click", function () {
+                            // Set epicenter
+                            epicenterLatLng = L.latLng(eLat, eLng);
+                            if (epicenterMarker) {
+                                epicenterMarker.setLatLng(epicenterLatLng);
+                            } else {
+                                epicenterMarker = L.marker(epicenterLatLng, { icon: epicenterIcon }).addTo(map);
+                            }
+
+                            // Clamp to slider ranges and update UI
+                            var clampedMag = Math.max(3.0, Math.min(9.0, eMag));
+                            var clampedDepth = Math.max(0, Math.min(700, eDepth || 10));
+                            magSlider.value = clampedMag.toFixed(1);
+                            depthSlider.value = Math.round(clampedDepth);
+                            magValue.textContent = clampedMag.toFixed(1);
+                            depthValue.textContent = Math.round(clampedDepth);
+
+                            // Trigger simulation
+                            simulateBtn.disabled = false;
+                            simulateBtn.click();
+                        });
+                    })(lat, lng, mag, depth);
 
                     recentLayer.addLayer(marker);
                 });
@@ -436,7 +463,7 @@
     var damagePanel = document.getElementById("damage-panel");
     var sourceBadge = document.getElementById("source-badge");
 
-    function fetchDamageStats(payload, avgMmi) {
+    function fetchDamageStats(payload, points) {
         fetch("/damage", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -445,7 +472,8 @@
                 lng: payload.lng,
                 magnitude: payload.magnitude,
                 depth: payload.depth,
-                avg_mmi: avgMmi,
+                points: points,
+                step_km: cellSizeKm,
             }),
         })
             .then(function (resp) {

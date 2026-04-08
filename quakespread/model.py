@@ -1,5 +1,4 @@
 import os
-import math
 import numpy as np
 
 _mmi_model = None
@@ -34,26 +33,6 @@ def _load_damage_model():
             )
         _damage_model = joblib.load(path)
     return _damage_model
-
-
-def _fallback_predict_mmi(magnitude, depth, distance, vs30, azimuth):
-    """Simple distance-decay formula for development without a trained model."""
-    if distance < 1:
-        distance = 1
-    mmi = magnitude * math.exp(-distance / 50)
-    return max(1.0, min(10.0, mmi))
-
-
-def _fallback_predict_damage(magnitude, depth, avg_mmi, population):
-    """Simple heuristic damage estimate for development without a trained model."""
-    severity = (avg_mmi / 10.0) * (magnitude / 9.0)
-    return {
-        "fatalities": int(population * severity * 0.0001),
-        "injuries": int(population * severity * 0.001),
-        "collapse_pct": round(severity * 15, 2),
-        "heavy_pct": round(severity * 25, 2),
-        "economic_loss_usd": round(population * severity * 500, 2),
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -91,14 +70,9 @@ def predict_mmi(magnitude, depth, distance, vs30, azimuth):
         response.raise_for_status()
         return float(response.json()["mmi"])
     else:
-        try:
-            model = _load_mmi_model()
-            result = model.predict([[magnitude, depth, distance, vs30, azimuth]])
-            return float(result[0])
-        except RuntimeError:
-            if os.getenv("FLASK_DEBUG"):
-                return _fallback_predict_mmi(magnitude, depth, distance, vs30, azimuth)
-            raise
+        model = _load_mmi_model()
+        result = model.predict([[magnitude, depth, distance, vs30, azimuth]])
+        return float(result[0])
 
 
 def predict_batch(features):
@@ -137,18 +111,10 @@ def predict_batch(features):
             results.append(float(response.json()["mmi"]))
         return results
     else:
-        try:
-            model = _load_mmi_model()
-            arr = np.array(features, dtype=np.float64)
-            predictions = model.predict(arr)
-            return [float(p) for p in predictions]
-        except RuntimeError:
-            if os.getenv("FLASK_DEBUG"):
-                return [
-                    _fallback_predict_mmi(mag, dep, dist, vs, az)
-                    for mag, dep, dist, vs, az in features
-                ]
-            raise
+        model = _load_mmi_model()
+        arr = np.array(features, dtype=np.float64)
+        predictions = model.predict(arr)
+        return [float(p) for p in predictions]
 
 
 # ---------------------------------------------------------------------------
@@ -180,17 +146,12 @@ def predict_damage(magnitude, depth, avg_mmi, population):
         response.raise_for_status()
         return response.json()
     else:
-        try:
-            model = _load_damage_model()
-            result = model.predict([[magnitude, depth, avg_mmi, population]])[0]
-            return {
-                "fatalities": max(0, int(result[0])),
-                "injuries": max(0, int(result[1])),
-                "collapse_pct": max(0.0, round(float(result[2]), 2)),
-                "heavy_pct": max(0.0, round(float(result[3]), 2)),
-                "economic_loss_usd": max(0.0, round(float(result[4]), 2)),
-            }
-        except RuntimeError:
-            if os.getenv("FLASK_DEBUG"):
-                return _fallback_predict_damage(magnitude, depth, avg_mmi, population)
-            raise
+        model = _load_damage_model()
+        result = model.predict([[magnitude, depth, avg_mmi, population]])[0]
+        return {
+            "fatalities": max(0, int(result[0])),
+            "injuries": max(0, int(result[1])),
+            "collapse_pct": max(0.0, round(float(result[2]), 2)),
+            "heavy_pct": max(0.0, round(float(result[3]), 2)),
+            "economic_loss_usd": max(0.0, round(float(result[4]), 2)),
+        }

@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+.env
+damage_model.pkl
