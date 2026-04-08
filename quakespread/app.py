@@ -138,7 +138,6 @@ def simulate():
     lng = data.get("lng")
     magnitude = data.get("magnitude")
     depth = data.get("depth")
-
     # Validate inputs
     errors = []
     if lat is None or not (-90 <= lat <= 90):
@@ -152,9 +151,9 @@ def simulate():
     if errors:
         return jsonify({"error": "; ".join(errors)}), 400
 
-    # Generate grid points within 150km radius at 5km spacing
+    # Generate grid points within 150km radius at 3km spacing (finer tiles = smoother edges)
     radius_km = 150
-    step_km = 5
+    step_km = 3
     lat_step = step_km / 111.0
     lon_step = step_km / (111.0 * math.cos(math.radians(lat)))
 
@@ -182,7 +181,7 @@ def simulate():
         return jsonify([])
 
     # Sample ~50 points for VS30 lookup, interpolate to all
-    n_samples = min(50, len(grid_points))
+    n_samples = min(100, len(grid_points))
     sample_indices = np.linspace(0, len(grid_points) - 1, n_samples, dtype=int)
     sample_points = [grid_points[i] for i in sample_indices]
 
@@ -214,10 +213,13 @@ def simulate():
     except Exception as e:
         return jsonify({"error": f"Prediction failed: {e}"}), 500
 
-    # Filter and sort — VS30 amplification already encoded in model predictions
+    # Use the ML model predictions directly — no manual correction formulas.
+    # The model was trained on real USGS ShakeMap data and already encodes
+    # distance attenuation, depth effects, VS30 soil amplification, and
+    # azimuthal variation from thousands of real earthquakes.
     results = []
     for p, mmi in zip(grid_points, predictions):
-        mmi = max(1.0, min(10.0, mmi))
+        mmi = max(1.0, min(10.0, float(mmi)))
         if mmi >= 2.0:
             results.append({
                 "lat": p["lat"],
@@ -227,7 +229,23 @@ def simulate():
             })
 
     results.sort(key=lambda r: r["distance"])
-    return jsonify(results)
+
+    # Fault proximity check — warns if simulated magnitude is geologically implausible
+    fault_dist, fault_name = _nearest_fault(lat, lng)
+    fault_info = None
+    if fault_dist is not None:
+        max_mag = _max_realistic_magnitude(fault_dist)
+        fault_info = {
+            "nearest_fault": fault_name,
+            "distance_km": round(fault_dist, 1),
+            "max_realistic_magnitude": max_mag,
+            "warning": (
+                f"M{magnitude} is geologically implausible {fault_dist:.0f} km from the nearest "
+                f"known fault ({fault_name}). Max realistic magnitude here: M{max_mag}."
+            ) if magnitude > max_mag else None,
+        }
+
+    return jsonify({"points": results, "fault_info": fault_info})
 
 
 @app.route("/recent")
@@ -282,6 +300,56 @@ FAULT_URL = (
     "https://raw.githubusercontent.com/cossatot/gem-global-active-faults"
     "/master/geojson/gem_active_faults.geojson"
 )
+
+
+def _nearest_fault(lat, lng):
+    """Return (distance_km, fault_name) to the nearest cached fault. Returns (None, None) if not loaded."""
+    features = _fault_cache.get("data")
+    if not features:
+        return None, None
+
+    min_dist_sq = float("inf")
+    nearest_name = "Unknown fault"
+
+    for feature in features:
+        geom = feature.get("geometry", {})
+        coords = geom.get("coordinates", [])
+        gtype = geom.get("type", "")
+        name = (feature.get("properties") or {}).get("name") or "Unknown fault"
+
+        lines = [coords] if gtype == "LineString" else (coords if gtype == "MultiLineString" else [])
+        for line in lines:
+            if not line:
+                continue
+            # Sample up to 8 evenly-spaced points from each segment (fast approximation)
+            step = max(1, len(line) // 8)
+            for pt in line[::step]:
+                d_lat = pt[1] - lat
+                d_lng = (pt[0] - lng) * math.cos(math.radians(lat))
+                dist_sq = d_lat ** 2 + d_lng ** 2
+                if dist_sq < min_dist_sq:
+                    min_dist_sq = dist_sq
+                    nearest_name = name
+
+    dist_km = (min_dist_sq ** 0.5) * 111.0
+    return dist_km, nearest_name
+
+
+def _max_realistic_magnitude(fault_dist_km):
+    """
+    Max plausible earthquake magnitude based on distance to nearest known fault.
+    Based on Wells & Coppersmith (1994) and intraplate seismicity records.
+    """
+    if fault_dist_km < 10:
+        return 9.5   # On or adjacent to a mapped fault — anything possible
+    elif fault_dist_km < 30:
+        return 8.0   # Near-fault, could be unmapped splay
+    elif fault_dist_km < 75:
+        return 7.0   # Intraplate edge — rare but possible (e.g. Christchurch 2011)
+    elif fault_dist_km < 150:
+        return 6.0   # Deep intraplate — uncommon
+    else:
+        return 5.5   # Stable craton — very rare, small events only
 
 
 def _load_faults():

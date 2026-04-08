@@ -133,6 +133,23 @@
             color: #f38ba8;
         }
 
+        #fault-info {
+            font-size: 11px;
+            color: #a6adc8;
+            line-height: 1.4;
+        }
+
+        #fault-warning {
+            font-size: 12px;
+            color: #fab387;
+            background: rgba(250, 179, 135, 0.1);
+            border-left: 3px solid #fab387;
+            padding: 6px 8px;
+            border-radius: 4px;
+            display: none;
+            line-height: 1.4;
+        }
+
         .instructions {
             font-size: 12px;
             color: #6c7086;
@@ -242,6 +259,8 @@
             </div>
 
             <div id="status">Click anywhere on the map to set an epicenter.</div>
+            <div id="fault-info"></div>
+            <div id="fault-warning"></div>
 
             <div class="instructions">
                 <strong>How to use:</strong><br>
@@ -254,7 +273,6 @@
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
     <script src="/static/app.js"></script>
 </body>
 </html>
