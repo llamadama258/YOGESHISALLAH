@@ -18,7 +18,7 @@
     // ---------------------------------------------------------------------------
     let epicenterMarker = null;
     let epicenterLatLng = null;
-    let heatLayer = null;
+    let simLayer = null;
     let animationTimeouts = [];
     let recentLayer = null;
     let recentLoaded = false;
@@ -105,8 +105,21 @@
                 }
                 return resp.json();
             })
-            .then(function (points) {
-                if (!points.length) {
+            .then(function (resp) {
+                var points = resp.points;
+                var faultInfo = resp.fault_info;
+
+                // Show fault proximity info
+                if (faultInfo) {
+                    var faultMsg = "Nearest fault: " + faultInfo.nearest_fault +
+                        " (" + faultInfo.distance_km + " km) — Max realistic M" +
+                        faultInfo.max_realistic_magnitude;
+                    setFaultInfo(faultMsg, faultInfo.warning);
+                } else {
+                    setFaultInfo("Enable fault lines layer for proximity check.", null);
+                }
+
+                if (!points || !points.length) {
                     setStatus("No significant shaking predicted at this magnitude/depth.");
                     simulateBtn.disabled = false;
                     simulateBtn.textContent = "Simulate";
@@ -120,10 +133,10 @@
                     [Math.min.apply(null, lats), Math.min.apply(null, lngs)],
                     [Math.max.apply(null, lats), Math.max.apply(null, lngs)],
                 ], { padding: [40, 40] });
-                animateHeatmap(points);
+                animateChoropleth(points);
 
                 // Fetch damage stats
-                var maxMmi = getMaxIntensity(points);
+                var maxMmi = Math.max.apply(null, points.map(function(p) { return p.intensity; }));
                 fetchDamageStats(payload, maxMmi);
             })
             .catch(function (err) {
@@ -134,83 +147,95 @@
     });
 
     // ---------------------------------------------------------------------------
-    // Heatmap animation — concentric rings spreading outward
+    // Choropleth simulation — colored polygon tiles, one per grid cell
     // ---------------------------------------------------------------------------
-    const heatGradient = {
-        0.1: "#43a047",
-        0.2: "#7cb342",
-        0.3: "#c0ca33",
-        0.4: "#fdd835",
-        0.5: "#ffb300",
-        0.6: "#fb8c00",
-        0.7: "#f4511e",
-        0.8: "#e53935",
-        1.0: "#b71c1c",
-    };
 
-    // Convert 7km to pixels at current zoom for smooth blending
-    function getHeatRadius() {
-        var zoom = map.getZoom();
-        var lat = epicenterLatLng ? epicenterLatLng.lat : 36.7;
-        var metersPerPixel = (40075016.686 * Math.cos(lat * Math.PI / 180)) / Math.pow(2, zoom + 8);
-        return Math.max(8, Math.min(80, 7000 / metersPerPixel));
+    // Map MMI 2–10 to color using same stops as the legend
+    var mmiStops = [
+        [2,  [67,  160, 71 ]],
+        [3,  [124, 179, 66 ]],
+        [4,  [192, 202, 51 ]],
+        [5,  [253, 216, 53 ]],
+        [6,  [255, 179, 0  ]],
+        [7,  [251, 140, 0  ]],
+        [8,  [244, 81,  30 ]],
+        [9,  [229, 57,  53 ]],
+        [10, [183, 28,  28 ]],
+    ];
+
+    function mmiToColor(mmi) {
+        mmi = Math.max(2, Math.min(10, mmi));
+        for (var i = 0; i < mmiStops.length - 1; i++) {
+            if (mmi <= mmiStops[i + 1][0]) {
+                var t = (mmi - mmiStops[i][0]) / (mmiStops[i + 1][0] - mmiStops[i][0]);
+                var a = mmiStops[i][1], b = mmiStops[i + 1][1];
+                return "rgb(" +
+                    Math.round(a[0] + t * (b[0] - a[0])) + "," +
+                    Math.round(a[1] + t * (b[1] - a[1])) + "," +
+                    Math.round(a[2] + t * (b[2] - a[2])) + ")";
+            }
+        }
+        return "rgb(183,28,28)";
     }
 
-    // Update radius when user zooms
-    map.on("zoomend", function () {
-        if (heatLayer) {
-            heatLayer.setOptions({ radius: getHeatRadius() });
-            heatLayer.redraw();
-        }
-    });
+    // Build a 3km × 3km GeoJSON polygon tile for a grid point
+    function makeCell(p) {
+        var latHalf = (3 / 111.0) / 2;
+        var lonHalf = (3 / (111.0 * Math.cos(p.lat * Math.PI / 180))) / 2;
+        return {
+            type: "Feature",
+            geometry: {
+                type: "Polygon",
+                coordinates: [[
+                    [p.lng - lonHalf, p.lat - latHalf],
+                    [p.lng + lonHalf, p.lat - latHalf],
+                    [p.lng + lonHalf, p.lat + latHalf],
+                    [p.lng - lonHalf, p.lat + latHalf],
+                    [p.lng - lonHalf, p.lat - latHalf],
+                ]],
+            },
+            properties: { mmi: p.intensity },
+        };
+    }
 
-    function animateHeatmap(points) {
+    var simRenderer = L.canvas({ padding: 0.5 });
+
+    function animateChoropleth(points) {
         clearAnimation();
 
-        // Normalize intensity to full 0-1 range based on actual min/max
-        // so center (highest MMI) is always red and edges (lowest) are always green
-        var maxMmi = points.reduce(function (m, p) { return Math.max(m, p.intensity); }, 0);
-        var minMmi = points.reduce(function (m, p) { return Math.min(m, p.intensity); }, 99);
-        var range = maxMmi - minMmi || 1;
-
-        // Group points into 10km-wide distance rings
-        var rings = {};
-        points.forEach(function (p) {
-            var ringIdx = Math.floor(p.distance / 10);
-            if (!rings[ringIdx]) rings[ringIdx] = [];
-            var normalized = (p.intensity - minMmi) / range;
-            rings[ringIdx].push([p.lat, p.lng, normalized]);
-        });
-
-        var ringKeys = Object.keys(rings)
-            .map(Number)
-            .sort(function (a, b) { return a - b; });
-
-        // Create heat layer — max:0.7 so peaks definitely hit red end of gradient
-        heatLayer = L.heatLayer([], {
-            radius: getHeatRadius(),
-            blur: 20,
-            max: 0.7,
-            minOpacity: 0.05,
-            gradient: heatGradient,
+        simLayer = L.geoJSON(null, {
+            style: function (feature) {
+                return {
+                    fillColor: mmiToColor(feature.properties.mmi),
+                    fillOpacity: 0.78,
+                    stroke: false,
+                    renderer: simRenderer,
+                };
+            },
         }).addTo(map);
 
-        var cumulativeData = [];
+        // Group into 10km-wide rings, sorted center-outward
+        var rings = {};
+        points.forEach(function (p) {
+            var key = Math.floor(p.distance / 10);
+            if (!rings[key]) rings[key] = [];
+            rings[key].push(p);
+        });
+
+        var ringKeys = Object.keys(rings).map(Number).sort(function (a, b) { return a - b; });
 
         ringKeys.forEach(function (key, i) {
             var timeout = setTimeout(function () {
-                cumulativeData = cumulativeData.concat(rings[key]);
-                heatLayer.setLatLngs(cumulativeData);
+                simLayer.addData({
+                    type: "FeatureCollection",
+                    features: rings[key].map(makeCell),
+                });
 
-                // Re-enable button after last ring
                 if (i === ringKeys.length - 1) {
                     simulateBtn.disabled = false;
                     simulateBtn.textContent = "Simulate";
-                    setStatus(
-                        "Simulation complete. " +
-                        cumulativeData.length + " points rendered. " +
-                        "Max intensity: " + getMaxIntensity(points).toFixed(1) + " MMI"
-                    );
+                    var maxMmi = points.reduce(function (m, p) { return Math.max(m, p.intensity); }, 0);
+                    setStatus("Simulation complete. Max MMI: " + maxMmi.toFixed(1));
                 }
             }, i * 80);
 
@@ -221,18 +246,10 @@
     function clearAnimation() {
         animationTimeouts.forEach(clearTimeout);
         animationTimeouts = [];
-        if (heatLayer) {
-            map.removeLayer(heatLayer);
-            heatLayer = null;
+        if (simLayer) {
+            map.removeLayer(simLayer);
+            simLayer = null;
         }
-    }
-
-    function getMaxIntensity(points) {
-        var max = 0;
-        points.forEach(function (p) {
-            if (p.intensity > max) max = p.intensity;
-        });
-        return max;
     }
 
     // ---------------------------------------------------------------------------
@@ -409,6 +426,10 @@
 
     legend.addTo(map);
 
+    // Auto-load fault lines on startup
+    faultToggle.checked = true;
+    refreshFaults();
+
     // ---------------------------------------------------------------------------
     // Damage stats — fetch + render
     // ---------------------------------------------------------------------------
@@ -530,5 +551,18 @@
     function setStatus(msg, isError) {
         statusDiv.textContent = msg;
         statusDiv.className = isError ? "error" : "";
+    }
+
+    function setFaultInfo(info, warning) {
+        var infoEl = document.getElementById("fault-info");
+        var warnEl = document.getElementById("fault-warning");
+        infoEl.textContent = info || "";
+        if (warning) {
+            warnEl.textContent = "⚠ " + warning;
+            warnEl.style.display = "block";
+        } else {
+            warnEl.textContent = "";
+            warnEl.style.display = "none";
+        }
     }
 })();
