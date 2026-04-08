@@ -10,6 +10,7 @@ API Endpoints:
 import os
 import math
 import time
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -270,6 +271,78 @@ def vs30():
 
     vs30_val = fetch_vs30_single(lat, lng)
     return jsonify({"vs30": vs30_val, "lat": lat, "lng": lng})
+
+
+# ---------------------------------------------------------------------------
+# Fault lines — cached server-side, filtered by zoom + viewport
+# ---------------------------------------------------------------------------
+_fault_cache = {"data": None}
+_fault_lock = threading.Lock()
+FAULT_URL = (
+    "https://raw.githubusercontent.com/cossatot/gem-global-active-faults"
+    "/master/geojson/gem_active_faults.geojson"
+)
+
+
+def _load_faults():
+    with _fault_lock:
+        if _fault_cache["data"] is None:
+            resp = requests.get(FAULT_URL, timeout=30)
+            resp.raise_for_status()
+            _fault_cache["data"] = resp.json().get("features", [])
+    return _fault_cache["data"]
+
+
+def _coord_count(feature):
+    geom = feature.get("geometry", {})
+    coords = geom.get("coordinates", [])
+    if geom.get("type") == "LineString":
+        return len(coords)
+    if geom.get("type") == "MultiLineString":
+        return sum(len(ln) for ln in coords)
+    return 0
+
+
+def _in_bounds(feature, min_lat, min_lng, max_lat, max_lng):
+    geom = feature.get("geometry", {})
+    coords = geom.get("coordinates", [])
+    lines = [coords] if geom.get("type") == "LineString" else coords
+    for line in lines:
+        for pt in line:
+            if min_lng <= pt[0] <= max_lng and min_lat <= pt[1] <= max_lat:
+                return True
+    return False
+
+
+@app.route("/faults")
+def faults():
+    zoom = request.args.get("zoom", 5, type=int)
+    min_lat = request.args.get("min_lat", -90, type=float)
+    max_lat = request.args.get("max_lat", 90, type=float)
+    min_lng = request.args.get("min_lng", -180, type=float)
+    max_lng = request.args.get("max_lng", 180, type=float)
+
+    # Zoom thresholds — higher min_coords = only longer (more major) faults shown
+    if zoom < 4:
+        return jsonify({"type": "FeatureCollection", "features": []})
+    elif zoom <= 5:
+        min_coords = 80
+    elif zoom <= 7:
+        min_coords = 30
+    else:
+        min_coords = 0
+
+    try:
+        features = _load_faults()
+    except Exception as e:
+        return jsonify({"error": f"Failed to load fault data: {e}"}), 502
+
+    filtered = [
+        f for f in features
+        if _coord_count(f) >= min_coords and _in_bounds(f, min_lat, min_lng, max_lat, max_lng)
+    ]
+
+    return jsonify({"type": "FeatureCollection", "features": filtered})
 
 
 if __name__ == "__main__":

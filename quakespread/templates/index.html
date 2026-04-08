@@ -187,6 +187,29 @@
             font-size: 10px;
             color: #a6adc8;
         }
+
+        /* Fault labels: hidden at low zoom, shown when #map has .show-fault-labels */
+        .fault-label {
+            display: none !important;
+        }
+
+        #map.show-fault-labels .fault-label {
+            display: block !important;
+            background: rgba(20, 20, 30, 0.75);
+            border: none;
+            box-shadow: none;
+            color: #ff9999;
+            font-size: 10px;
+            font-weight: 600;
+            padding: 1px 4px;
+            border-radius: 3px;
+            white-space: nowrap;
+            pointer-events: none;
+        }
+
+        #map.show-fault-labels .fault-label::before {
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -211,6 +234,11 @@
             <div class="toggle-group">
                 <input type="checkbox" id="recent-toggle">
                 <label for="recent-toggle">Show Recent Earthquakes</label>
+            </div>
+
+            <div class="toggle-group">
+                <input type="checkbox" id="fault-toggle">
+                <label for="fault-toggle">Show Fault Lines</label>
             </div>
 
             <div id="status">Click anywhere on the map to set an epicenter.</div>

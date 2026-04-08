@@ -22,6 +22,8 @@
     let animationTimeouts = [];
     let recentLayer = null;
     let recentLoaded = false;
+    let faultLayer = null;
+    let faultLoaded = false;
 
     // DOM elements
     const magSlider = document.getElementById("magnitude");
@@ -110,6 +112,13 @@
                     return;
                 }
                 setStatus(points.length + " grid points received. Animating...");
+                // Fit map to show the full simulation area
+                var lats = points.map(function (p) { return p.lat; });
+                var lngs = points.map(function (p) { return p.lng; });
+                map.fitBounds([
+                    [Math.min.apply(null, lats), Math.min.apply(null, lngs)],
+                    [Math.max.apply(null, lats), Math.max.apply(null, lngs)],
+                ], { padding: [40, 40] });
                 animateHeatmap(points);
             })
             .catch(function (err) {
@@ -134,12 +143,12 @@
         1.0: "#b71c1c",
     };
 
-    // Convert 6km (slightly above 5km grid spacing) to pixels at current zoom
+    // Convert 7km to pixels at current zoom for smooth blending
     function getHeatRadius() {
         var zoom = map.getZoom();
         var lat = epicenterLatLng ? epicenterLatLng.lat : 36.7;
         var metersPerPixel = (40075016.686 * Math.cos(lat * Math.PI / 180)) / Math.pow(2, zoom + 8);
-        return Math.max(4, Math.min(60, 6000 / metersPerPixel));
+        return Math.max(8, Math.min(80, 7000 / metersPerPixel));
     }
 
     // Update radius when user zooms
@@ -153,23 +162,31 @@
     function animateHeatmap(points) {
         clearAnimation();
 
+        // Normalize intensity to full 0-1 range based on actual min/max
+        // so center (highest MMI) is always red and edges (lowest) are always green
+        var maxMmi = points.reduce(function (m, p) { return Math.max(m, p.intensity); }, 0);
+        var minMmi = points.reduce(function (m, p) { return Math.min(m, p.intensity); }, 99);
+        var range = maxMmi - minMmi || 1;
+
         // Group points into 10km-wide distance rings
         var rings = {};
         points.forEach(function (p) {
             var ringIdx = Math.floor(p.distance / 10);
             if (!rings[ringIdx]) rings[ringIdx] = [];
-            rings[ringIdx].push([p.lat, p.lng, p.intensity / 10]);
+            var normalized = (p.intensity - minMmi) / range;
+            rings[ringIdx].push([p.lat, p.lng, normalized]);
         });
 
         var ringKeys = Object.keys(rings)
             .map(Number)
             .sort(function (a, b) { return a - b; });
 
-        // Create heat layer with geographically correct radius
+        // Create heat layer — max:0.7 so peaks definitely hit red end of gradient
         heatLayer = L.heatLayer([], {
             radius: getHeatRadius(),
-            blur: 12,
-            max: 1.0,
+            blur: 20,
+            max: 0.7,
+            minOpacity: 0.05,
             gradient: heatGradient,
         }).addTo(map);
 
@@ -281,6 +298,92 @@
                 recentToggle.checked = false;
             });
     }
+
+    // ---------------------------------------------------------------------------
+    // Fault lines layer (GEM Global Active Faults)
+    // ---------------------------------------------------------------------------
+    var faultToggle = document.getElementById("fault-toggle");
+
+    faultToggle.addEventListener("change", function () {
+        if (this.checked) {
+            if (!faultLoaded) {
+                loadFaultLines();
+            } else if (faultLayer) {
+                map.addLayer(faultLayer);
+            }
+        } else {
+            if (faultLayer) {
+                map.removeLayer(faultLayer);
+            }
+        }
+    });
+
+    var mapEl = document.getElementById("map");
+    var faultUpdateTimer = null;
+
+    function updateFaultLabelVisibility() {
+        if (map.getZoom() >= 8) {
+            mapEl.classList.add("show-fault-labels");
+        } else {
+            mapEl.classList.remove("show-fault-labels");
+        }
+    }
+
+    function refreshFaults() {
+        if (!faultToggle.checked) return;
+
+        // Debounce — wait for zoom/pan to settle
+        clearTimeout(faultUpdateTimer);
+        faultUpdateTimer = setTimeout(function () {
+            var bounds = map.getBounds();
+            var zoom = map.getZoom();
+            var params = new URLSearchParams({
+                zoom: zoom,
+                min_lat: bounds.getSouth(),
+                max_lat: bounds.getNorth(),
+                min_lng: bounds.getWest(),
+                max_lng: bounds.getEast(),
+            });
+
+            fetch("/faults?" + params)
+                .then(function (resp) {
+                    if (!resp.ok) throw new Error("Fault fetch failed");
+                    return resp.json();
+                })
+                .then(function (geojson) {
+                    if (faultLayer) map.removeLayer(faultLayer);
+
+                    faultLayer = L.geoJSON(geojson, {
+                        style: { color: "#ff4444", weight: 1.2, opacity: 0.7 },
+                        onEachFeature: function (feature, layer) {
+                            var props = feature.properties || {};
+                            var name = props.name || props.fault_name || "Unnamed fault";
+                            var slip = props.slip_type || "";
+                            layer.bindTooltip(name, {
+                                permanent: true,
+                                direction: "center",
+                                className: "fault-label",
+                            });
+                            layer.bindPopup(
+                                "<strong>" + name + "</strong>" +
+                                (slip ? "<br>Slip type: " + slip : "")
+                            );
+                        },
+                    }).addTo(map);
+
+                    faultLoaded = true;
+                    updateFaultLabelVisibility();
+                })
+                .catch(function (err) {
+                    setStatus("Fault lines error: " + err.message, true);
+                });
+        }, 400);
+    }
+
+    map.on("zoomend moveend", function () {
+        updateFaultLabelVisibility();
+        refreshFaults();
+    });
 
     // ---------------------------------------------------------------------------
     // MMI Legend
