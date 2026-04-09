@@ -2,15 +2,18 @@
 QuakeSpread — Flask Backend
 
 API Endpoints:
-    POST /simulate  — Run earthquake damage simulation
-    GET  /recent    — Recent M3.0+ earthquakes from USGS
-    GET  /vs30      — VS30 soil value lookup
+    POST /simulate    — Run earthquake damage simulation
+    GET  /recent      — Recent M3.0+ earthquakes from USGS
+    GET  /vs30        — VS30 soil value lookup
+    GET  /ocean-check — Check if lat/lng is in ocean (NOAA ETOPO1)
+    POST /tsunami     — Run tsunami wave propagation simulation
 """
 
 import os
 import math
 import time
 import threading
+import heapq
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -33,9 +36,357 @@ CORS(app)
 _vs30_cache = {}
 VS30_DEFAULT = 360.0
 
+# ---------------------------------------------------------------------------
+# NOAA ETOPO1 bathymetry constants
+# ---------------------------------------------------------------------------
+ETOPO1_URL = (
+    "https://gis.ngdc.noaa.gov/arcgis/rest/services/DEM_mosaics"
+    "/DEM_global_mosaic/ImageServer/identify"
+)
+_bathy_cache = {}  # (rounded_lat, rounded_lng) -> elevation_m
+
+# ---------------------------------------------------------------------------
+# NOAA historical tsunami database
+# ---------------------------------------------------------------------------
+NOAA_TSUNAMI_URL = (
+    "https://www.ngdc.noaa.gov/hazel/hazard-service/api/v1/tsunamis/events"
+)
+
+# ---------------------------------------------------------------------------
+# DART buoy network — known active buoy positions
+# ---------------------------------------------------------------------------
+DART_BUOYS = [
+    {"id": "21418", "lat": 38.711,  "lng": 148.694,  "name": "DART 21418 (NW Pacific)"},
+    {"id": "21413", "lat": 30.519,  "lng": 152.117,  "name": "DART 21413 (Japan)"},
+    {"id": "21401", "lat": 42.617,  "lng": 152.583,  "name": "DART 21401 (NW Pacific)"},
+    {"id": "21415", "lat": 14.601,  "lng": 176.247,  "name": "DART 21415 (W Pacific)"},
+    {"id": "21416", "lat": 19.273,  "lng": 174.878,  "name": "DART 21416 (Micronesia)"},
+    {"id": "52402", "lat": 11.883,  "lng": 154.116,  "name": "DART 52402 (W Pacific)"},
+    {"id": "52403", "lat":  4.053,  "lng": 141.851,  "name": "DART 52403 (W Pacific)"},
+    {"id": "55015", "lat": -24.637, "lng": 177.685,  "name": "DART 55015 (Tonga)"},
+    {"id": "55023", "lat": -10.010, "lng": 170.009,  "name": "DART 55023 (Solomon Is.)"},
+    {"id": "46407", "lat": 54.007,  "lng": -136.102, "name": "DART 46407 (Gulf of Alaska)"},
+    {"id": "46408", "lat": 58.893,  "lng": -144.694, "name": "DART 46408 (Alaska)"},
+    {"id": "46409", "lat": 55.497,  "lng": -155.949, "name": "DART 46409 (Alaska)"},
+    {"id": "46411", "lat": 39.313,  "lng": -126.001, "name": "DART 46411 (NE Pacific)"},
+    {"id": "46412", "lat": 37.936,  "lng": -129.977, "name": "DART 46412 (NE Pacific)"},
+    {"id": "46419", "lat": 48.487,  "lng": -129.381, "name": "DART 46419 (NE Pacific)"},
+    {"id": "32401", "lat": -17.975, "lng": -100.131, "name": "DART 32401 (SE Pacific)"},
+    {"id": "32412", "lat":  8.492,  "lng": -125.028, "name": "DART 32412 (E Pacific)"},
+    {"id": "43412", "lat": 11.138,  "lng":  -93.527, "name": "DART 43412 (E Pacific)"},
+    {"id": "23401", "lat":  -4.061, "lng":   86.932, "name": "DART 23401 (Indian Ocean)"},
+    {"id": "23227", "lat": -13.700, "lng":   53.200, "name": "DART 23227 (Indian Ocean)"},
+]
+
 USGS_VS30_URL = (
     "https://earthquake.usgs.gov/arcgis/rest/services/eq/vs30_mosaic/MapServer/identify"
 )
+
+
+# ---------------------------------------------------------------------------
+# NOAA ETOPO1 bathymetry fetch
+# ---------------------------------------------------------------------------
+
+def _round_bathy(val, precision=0.1):
+    return round(val / precision) * precision
+
+
+def fetch_elevation_single(lat, lng):
+    """Return elevation (m) from NOAA ETOPO1 global mosaic.
+
+    Negative values = ocean depth below sea level.
+    Positive values = land elevation above sea level.
+    """
+    key = (_round_bathy(lat), _round_bathy(lng))
+    if key in _bathy_cache:
+        return _bathy_cache[key]
+
+    try:
+        params = {
+            "geometry": f"{lng},{lat}",
+            "geometryType": "esriGeometryPoint",
+            "returnGeometry": "false",
+            "returnCatalogItems": "false",
+            "f": "json",
+        }
+        resp = requests.get(ETOPO1_URL, params=params, timeout=8)
+        resp.raise_for_status()
+        data = resp.json()
+        val = data.get("value", "NoData")
+        if val and val != "NoData":
+            elev = float(val)
+            _bathy_cache[key] = elev
+            return elev
+    except Exception:
+        pass
+
+    # Default: assume deep ocean (-4000m) — safer than assuming land
+    _bathy_cache[key] = -4000.0
+    return -4000.0
+
+
+# ---------------------------------------------------------------------------
+# Tsunami helpers
+# ---------------------------------------------------------------------------
+_G = 9.81  # gravity m/s²
+
+
+def _wave_speed_ms(depth_m):
+    """Shallow-water wave speed c = sqrt(g * d)."""
+    return math.sqrt(_G * max(depth_m, 1.0))
+
+
+def _initial_wave_height(magnitude):
+    """Source wave height estimate (Abe 1979 empirical formula, meters)."""
+    return max(0.05, 10 ** (0.5 * magnitude - 3.5))
+
+
+def _rupture_radius_km(magnitude):
+    """Approximate half-length of rupture zone (km)."""
+    return max(20.0, 10 ** (0.5 * magnitude - 2.0))
+
+
+def _check_noaa_tsunami(lat, lng, magnitude):
+    """Query NOAA historical tsunami database for events near this location.
+
+    Returns (source_tag, event_dict_or_None).
+    """
+    try:
+        # Year window: look across the full catalog
+        params = {
+            "minLatitude": lat - 3.0,
+            "maxLatitude": lat + 3.0,
+            "minLongitude": lng - 3.0,
+            "maxLongitude": lng + 3.0,
+            "minMagnitude": magnitude - 0.8,
+            "maxMagnitude": magnitude + 0.8,
+            "orderBy": "time",
+            "limit": 5,
+        }
+        resp = requests.get(NOAA_TSUNAMI_URL, params=params, timeout=8)
+        resp.raise_for_status()
+        data = resp.json()
+        items = data.get("items", [])
+        if items:
+            ev = items[0]
+            return "real", {
+                "year": ev.get("year"),
+                "location": ev.get("locationName", "Unknown"),
+                "magnitude": ev.get("eqMagnitude"),
+                "max_wave_height": ev.get("maximumWaterHeight"),
+            }
+    except Exception:
+        pass
+    return "simulated", None
+
+
+def _get_nearby_dart_buoys(lat, lng, radius_km=4000):
+    """Return DART buoys within radius_km of the given point."""
+    nearby = []
+    for b in DART_BUOYS:
+        d = haversine(lat, lng, b["lat"], b["lng"])
+        if d <= radius_km:
+            # Try fetching real-time status (optional — fails gracefully)
+            status = _fetch_dart_status(b["id"])
+            nearby.append({
+                "id": b["id"],
+                "lat": b["lat"],
+                "lng": b["lng"],
+                "name": b["name"],
+                "distance_km": round(d, 0),
+                "status": status,
+            })
+    nearby.sort(key=lambda x: x["distance_km"])
+    return nearby[:8]  # Limit to 8 nearest
+
+
+def _fetch_dart_status(buoy_id):
+    """Fetch latest DART buoy reading; returns dict or None."""
+    try:
+        url = f"https://www.ndbc.noaa.gov/data/realtime2/{buoy_id}.dart"
+        resp = requests.get(url, timeout=5)
+        if resp.status_code != 200:
+            return None
+        lines = [l for l in resp.text.splitlines() if not l.startswith("#")]
+        if len(lines) < 2:
+            return None
+        # Most-recent data line
+        parts = lines[-1].split()
+        # DART format: YY MM DD hh mm ss T HEIGHT(m) ...
+        if len(parts) >= 8:
+            try:
+                height = float(parts[7])
+                return {"wc_height_m": round(height, 3), "online": True}
+            except ValueError:
+                pass
+        return {"online": True}
+    except Exception:
+        return None
+
+
+def _run_tsunami_simulation(epi_lat, epi_lng, magnitude, depth_km):
+    """
+    Run a Dijkstra-based tsunami wave propagation on an ETOPO1 bathymetry grid.
+
+    Returns (animation_rings, coastline_impacts).
+    """
+    SIM_RADIUS_KM = 1500
+    GRID_STEP_KM  = 80
+
+    lat_step = GRID_STEP_KM / 111.0
+    lon_step = GRID_STEP_KM / (111.0 * math.cos(math.radians(epi_lat)))
+
+    n_half_lat = int(SIM_RADIUS_KM / (GRID_STEP_KM * 0.9)) + 1
+    n_half_lon = int(SIM_RADIUS_KM / (GRID_STEP_KM * 0.9)) + 1
+
+    n_lat = 2 * n_half_lat + 1
+    n_lon = 2 * n_half_lon + 1
+    ci, cj = n_half_lat, n_half_lon  # center indices
+
+    grid_lats = [epi_lat + (i - ci) * lat_step for i in range(n_lat)]
+    grid_lons = [epi_lng + (j - cj) * lon_step for j in range(n_lon)]
+
+    # Collect cells within radius
+    in_radius = []
+    for i, la in enumerate(grid_lats):
+        if la < -85 or la > 85:
+            continue
+        for j, lo in enumerate(grid_lons):
+            dist = haversine(epi_lat, epi_lng, la, lo)
+            if dist <= SIM_RADIUS_KM:
+                in_radius.append((i, j, la, lo, dist))
+
+    if not in_radius:
+        return [], []
+
+    # Sample bathymetry at up to 220 representative points
+    n_samples = min(220, len(in_radius))
+    sample_idx = np.linspace(0, len(in_radius) - 1, n_samples, dtype=int)
+    samples = [in_radius[k] for k in sample_idx]
+
+    with ThreadPoolExecutor(max_workers=15) as exc:
+        elev_vals = list(exc.map(
+            lambda c: fetch_elevation_single(c[2], c[3]), samples
+        ))
+
+    # Interpolate to all in-radius cells
+    scoords = np.array([[s[2], s[3]] for s in samples])
+    interp  = NearestNDInterpolator(scoords, elev_vals)
+    acoords = np.array([[c[2], c[3]] for c in in_radius])
+    all_elevs = interp(acoords)
+
+    # Populate 2D arrays
+    LAND_ELEV = 9999.0
+    elev_grid  = np.full((n_lat, n_lon), LAND_ELEV)
+    depth_grid = np.zeros((n_lat, n_lon))  # ocean depth (m), 0 = land/outside
+
+    for (i, j, la, lo, dist), elev in zip(in_radius, all_elevs):
+        elev_grid[i, j] = elev
+        if elev < 0:
+            depth_grid[i, j] = max(1.0, -elev)
+
+    # If epicenter cell is marked land (possible interpolation error), force ocean
+    epi_elev = elev_grid[ci, cj]
+    if epi_elev >= 0:
+        depth_grid[ci, cj] = 500.0  # assume 500m if we can't resolve it
+
+    # Dijkstra travel-time propagation (seconds)
+    INF = 1e18
+    time_grid = np.full((n_lat, n_lon), INF)
+    time_grid[ci, cj] = 0.0
+    pq = [(0.0, ci, cj)]
+
+    while pq:
+        t, i, j = heapq.heappop(pq)
+        if t > time_grid[i, j] + 1.0:
+            continue
+        if depth_grid[i, j] == 0:
+            continue
+
+        for di, dj in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            ni, nj = i + di, j + dj
+            if not (0 <= ni < n_lat and 0 <= nj < n_lon):
+                continue
+            if depth_grid[ni, nj] == 0:
+                continue
+
+            avg_depth = (depth_grid[i, j] + depth_grid[ni, nj]) / 2.0
+            speed_ms  = _wave_speed_ms(avg_depth)
+            dist_m    = haversine(grid_lats[i], grid_lons[j],
+                                  grid_lats[ni], grid_lons[nj]) * 1000.0
+            new_t = t + dist_m / speed_ms
+            if new_t < time_grid[ni, nj]:
+                time_grid[ni, nj] = new_t
+                heapq.heappush(pq, (new_t, ni, nj))
+
+    # Collect animation data
+    H0     = _initial_wave_height(magnitude)
+    R0_km  = _rupture_radius_km(magnitude)
+
+    animation_cells = []
+    coastline_impacts = []
+
+    for i in range(n_lat):
+        for j in range(n_lon):
+            t = time_grid[i, j]
+            if t >= INF or depth_grid[i, j] == 0:
+                continue
+
+            la  = grid_lats[i]
+            lo  = grid_lons[j]
+            t_m = t / 60.0
+            r   = haversine(epi_lat, epi_lng, la, lo)
+
+            # Cylindrical spreading
+            h = H0 * math.sqrt(R0_km / max(R0_km, r))
+
+            # Green's Law shoaling at d < 500m
+            d = depth_grid[i, j]
+            if d < 500.0:
+                h = h * (4000.0 / max(1.0, d)) ** 0.25
+
+            h = min(h, 120.0)  # physical cap
+
+            animation_cells.append({
+                "lat":            round(la, 4),
+                "lng":            round(lo, 4),
+                "travel_minutes": round(t_m, 1),
+                "depth":          round(d, 0),
+                "height_m":       round(h, 2),
+            })
+
+            # Coastline cell = ocean adjacent to land
+            is_coast = any(
+                0 <= i + di < n_lat and
+                0 <= j + dj < n_lon and
+                elev_grid[i + di, j + dj] >= 0 and
+                elev_grid[i + di, j + dj] < LAND_ELEV
+                for di, dj in ((-1, 0), (1, 0), (0, -1), (0, 1))
+            )
+            if is_coast and t_m > 0.5:
+                coastline_impacts.append({
+                    "lat":            round(la, 4),
+                    "lng":            round(lo, 4),
+                    "travel_minutes": round(t_m, 1),
+                    "height_m":       round(h, 2),
+                })
+
+    animation_cells.sort(key=lambda x: x["travel_minutes"])
+    coastline_impacts.sort(key=lambda x: x["travel_minutes"])
+
+    # Group animation cells into 4-minute time bands
+    BAND_MIN = 4
+    bands = {}
+    for cell in animation_cells:
+        b = int(cell["travel_minutes"] / BAND_MIN)
+        bands.setdefault(b, []).append(cell)
+
+    animation_rings = [
+        {"travel_minutes": b * BAND_MIN, "cells": bands[b]}
+        for b in sorted(bands)
+    ]
+
+    return animation_rings, coastline_impacts
 
 
 def _round_coord(val, precision=0.02):
@@ -671,6 +1022,72 @@ def faults():
     ]
 
     return jsonify({"type": "FeatureCollection", "features": filtered})
+
+
+# ---------------------------------------------------------------------------
+# Ocean-check endpoint — uses NOAA ETOPO1
+# ---------------------------------------------------------------------------
+
+@app.route("/ocean-check")
+def ocean_check():
+    lat = request.args.get("lat", type=float)
+    lng = request.args.get("lng", type=float)
+
+    if lat is None or lng is None:
+        return jsonify({"error": "lat and lng query parameters required"}), 400
+
+    elevation = fetch_elevation_single(lat, lng)
+    return jsonify({
+        "is_ocean": bool(elevation < 0),
+        "elevation_m": round(elevation, 1),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Tsunami simulation endpoint
+# ---------------------------------------------------------------------------
+
+@app.route("/tsunami", methods=["POST"])
+def tsunami():
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "JSON body required"}), 400
+
+    lat       = data.get("lat")
+    lng       = data.get("lng")
+    magnitude = data.get("magnitude")
+    depth_km  = data.get("depth")
+
+    if None in (lat, lng, magnitude, depth_km):
+        return jsonify({"error": "lat, lng, magnitude, depth are required"}), 400
+    if not (-90 <= lat <= 90) or not (-180 <= lng <= 180):
+        return jsonify({"error": "Invalid coordinates"}), 400
+    if not (3.0 <= magnitude <= 9.0):
+        return jsonify({"error": "magnitude must be 3.0–9.0"}), 400
+
+    # Verify epicenter is actually in the ocean
+    epi_elev = fetch_elevation_single(lat, lng)
+    if epi_elev >= 0:
+        return jsonify({"error": "Epicenter is not in the ocean"}), 400
+
+    animation_rings, coastline_impacts = _run_tsunami_simulation(
+        lat, lng, magnitude, depth_km
+    )
+
+    noaa_source, noaa_event = _check_noaa_tsunami(lat, lng, magnitude)
+    dart_buoys = _get_nearby_dart_buoys(lat, lng, radius_km=4000)
+
+    H0 = _initial_wave_height(magnitude)
+
+    return jsonify({
+        "animation_rings":   animation_rings,
+        "coastline_impacts": coastline_impacts[:25],
+        "noaa_source":       noaa_source,
+        "noaa_event":        noaa_event,
+        "dart_buoys":        dart_buoys,
+        "initial_height_m":  round(H0, 2),
+        "grid_step_km":      80,
+    })
 
 
 if __name__ == "__main__":
